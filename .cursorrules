@@ -1,0 +1,60 @@
+# DocuFlow .cursorrules
+# Windows Document Management Desktop App
+
+## Stack
+- Electron 30 + React 18 + TypeScript (strict)
+- Tailwind CSS 3 (no inline styles)
+- Zustand for state
+- pdf-lib for PDF operations
+- Sharp (main process only) for image processing
+- @dnd-kit/core for drag-and-drop
+- electron-vite + Vite for build
+
+## Architecture Rules
+- Renderer process: React UI only. NO direct fs/electron/node imports.
+- Main process: All file ops, scanner, pdf-lib, sharp run here.
+- IPC channels: Named "docuflow:[noun]:[verb]". Typed in src/types/IPC.types.ts.
+- Preload: Only expose typed IPC functions. Never expose raw objects.
+- Temp files: All work in os.tmpdir()/docuflow-session-[uuid]/. Never touch originals.
+
+## Code Rules
+- TypeScript strict mode. No `any`. Use Result<T> pattern for all async ops.
+- Functional React components only. No class components.
+- All hooks in src/hooks/. No business logic in components.
+- All errors must be typed AppError with code, message, detail, recoverable.
+- JSDoc on every exported function.
+- No commented-out code.
+
+## Security Rules
+- nodeIntegration: false always.
+- contextIsolation: true always.
+- No eval() anywhere.
+- Validate all IPC inputs in main process before use.
+- No external network calls.
+
+## Style Rules
+- Colors from CSS variables in design system (see DOCUFLOW_PROJECT_GUIDE.md).
+- Tailwind utility classes only — no style={} props.
+- Inter font for all text. JetBrains Mono for sizes/numbers/filenames.
+- Primary blue (#2563EB) used for ONE primary button per screen max.
+- Error states: red. Success: green. Warning: amber.
+
+## When generating components:
+- Always include loading, error, and empty states.
+- Always include keyboard accessibility (onKeyDown for Enter/Space on clickable divs).
+- Always add aria-label to icon-only buttons.
+- Always clean up useEffect subscriptions.
+
+## When generating IPC handlers:
+- Always validate input shape in main process.
+- Always return Result<T> type.
+- Always log errors to electron-log with detail field.
+- Always clean up temp resources if operation fails.
+
+## Do NOT generate:
+- Any code that modifies original uploaded files.
+- Any fetch() or axios call to external URLs.
+- Any use of localStorage (use electron-store instead).
+- Any synchronous file reads on large files in main thread.
+- Any bare catch(e) {} blocks.
+- Any hardcoded file paths (use path.join + app.getPath).
