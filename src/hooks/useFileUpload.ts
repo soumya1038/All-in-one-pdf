@@ -120,7 +120,7 @@ export function useFileUpload() {
         setIsUploading(false);
       }
     },
-    [addDocuments, documents, setView]
+    [addDocuments, documents, setView, activeWorkflow, updateOutputOptions]
   );
 
   return {

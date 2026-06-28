@@ -25,6 +25,35 @@ export class PdfService {
         };
       }
 
+      const hasImages = documentPaths.some((p) => {
+        const lower = p.toLowerCase();
+        return lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg');
+      });
+
+      if (!hasImages) {
+        try {
+          const { exec } = require('child_process');
+          const { promisify } = require('util');
+          const execAsync = promisify(exec);
+
+          const escape = (str: string) => str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          const outputEscaped = escape(outputPath);
+          const inputPathsEscaped = documentPaths.map(p => `'${escape(p)}'`).join(', ');
+
+          const pyCommand = `python -c "from pypdf import PdfWriter; m=PdfWriter(); [m.append(p) for p in [${inputPathsEscaped}]]; m.write('${outputEscaped}'); m.close()"`;
+          await execAsync(pyCommand);
+
+          console.log(`Merged ${documentPaths.length} PDFs into: ${outputPath} using Python pypdf`);
+          return {
+            success: true,
+            data: outputPath,
+          };
+        } catch (pyError) {
+          console.warn('Python PDF merge failed, falling back to JS pdf-lib merge:', pyError);
+          // Fallback to JS pdf-lib merge
+        }
+      }
+
       // Create a new PDF document
       const mergedPdf = await PDFDocument.create();
 
@@ -75,7 +104,7 @@ export class PdfService {
       const mergedPdfBytes = await mergedPdf.save();
       await writeFile(outputPath, mergedPdfBytes);
 
-      console.log(`Merged ${documentPaths.length} PDFs into: ${outputPath}`);
+      console.log(`Merged ${documentPaths.length} PDFs into: ${outputPath} using JS pdf-lib`);
 
       return {
         success: true,
