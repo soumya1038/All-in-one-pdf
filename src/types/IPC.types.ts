@@ -1,5 +1,5 @@
 import { Result } from './Error.types';
-import { DocumentItem, DocumentType, RecentFile } from './Document.types';
+import { DocumentItem, DocumentType, RecentFile, PlacedSignature } from './Document.types';
 import { ScannerDevice, ScanSettings, ScanResult } from './Scanner.types';
 import { OutputOptions, ProcessingResult } from './Output.types';
 
@@ -30,6 +30,7 @@ export enum IpcChannel {
   // Document operations
   DOCUMENT_APPLY_EDIT = 'docuflow:document:applyEdit',
   DOCUMENT_GET_PREVIEW = 'docuflow:document:getPreview',
+  DOCUMENT_RENDER_PDF_PAGE = 'docuflow:document:renderPdfPage',
   
   // Output operations
   OUTPUT_PROCESS = 'docuflow:output:process',
@@ -37,11 +38,18 @@ export enum IpcChannel {
   
   // System operations
   SYSTEM_GET_RECENT = 'docuflow:system:getRecent',
+  SYSTEM_ADD_RECENT = 'docuflow:system:addRecent',
   SYSTEM_CLEAR_TEMP = 'docuflow:system:clearTemp',
   SYSTEM_OPEN_FILE = 'docuflow:system:openFile',
   SYSTEM_OPEN_FOLDER = 'docuflow:system:openFolder',
   SYSTEM_SHOW_OPEN_DIALOG = 'docuflow:system:showOpenDialog',
   SYSTEM_PRINT = 'docuflow:system:print',
+  SYSTEM_DIALOG_CONFIRM = 'docuflow:system:dialogConfirm',
+
+  // Window controls
+  WINDOW_MINIMIZE = 'docuflow:window:minimize',
+  WINDOW_MAXIMIZE = 'docuflow:window:maximize',
+  WINDOW_CLOSE = 'docuflow:window:close',
 }
 
 /**
@@ -176,13 +184,21 @@ export interface IpcApi {
   saveOutput: (outputPath: string) => Promise<Result<void>>;
   
   // Document operations
-  applyDocumentEdit: (documentId: string, base64Data: string) => Promise<Result<DocumentItem>>;
+  applyDocumentEdit: (documentId: string, base64Data: string, cleanBase64Data?: string, signatures?: PlacedSignature[], pageNumber?: number) => Promise<Result<DocumentItem>>;
+  renderPdfPage: (documentId: string, pageNumber?: number) => Promise<Result<string>>;
   
   // System operations
   getRecentFiles: () => Promise<Result<RecentFile[]>>;
+  addRecentFile: (file: RecentFile) => Promise<Result<void>>;
   clearTemp: () => Promise<Result<void>>;
   openFile: (filePath: string) => Promise<Result<void>>;
-  openFolder: (folderPath: string) => Promise<Result<void>>;
+  openFolder: (filePath: string) => Promise<Result<void>>;
   showOpenDialog: (options?: any) => Promise<Result<string[]>>;
   printDocument: (documentId: string) => Promise<Result<void>>;
+  showConfirmDialog: (message: string, title?: string) => Promise<boolean>;
+
+  // Window controls
+  minimizeWindow: () => void;
+  maximizeWindow: () => void;
+  closeWindow: () => void;
 }

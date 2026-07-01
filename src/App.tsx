@@ -1,22 +1,19 @@
 import { Toaster } from 'react-hot-toast';
 import { useAppStore } from './store/appStore';
 import { AppView } from './types/UI.types';
-import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import MainLayout from './components/layout/MainLayout';
 import HomeScreen from './screens/HomeScreen';
 import DocumentListScreen from './screens/DocumentListScreen';
 import OutputScreen from './screens/OutputScreen';
 import ProcessingScreen from './screens/ProcessingScreen';
 import SuccessScreen from './screens/SuccessScreen';
+import PreviewScreen from './screens/PreviewScreen';
 import ScannerModal from './components/scanner/ScannerModal';
 import DocumentPreviewModal from './components/document/DocumentPreviewModal';
 import AddMoreModal from './components/document/AddMoreModal';
 
 function App() {
   const currentView = useAppStore((state) => state.ui.currentView);
-
-  // Enable keyboard shortcuts
-  useKeyboardShortcuts();
 
   const renderScreen = () => {
     switch (currentView) {
@@ -30,6 +27,8 @@ function App() {
         return <ProcessingScreen />;
       case AppView.SUCCESS:
         return <SuccessScreen />;
+      case AppView.PREVIEW:
+        return <PreviewScreen />;
       default:
         return <HomeScreen />;
     }

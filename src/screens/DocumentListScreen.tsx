@@ -24,11 +24,16 @@ function SortableDocumentCard({ document }: { document: DocumentItem }) {
   };
 
   const removeDocument = useAppStore((state) => state.removeDocument);
-  const openModal = useAppStore((state) => state.openModal);
+  const setView = useAppStore((state) => state.setView);
+  const setSelectedDocument = useAppStore((state) => state.setSelectedDocument);
+  const setPreviewBackView = useAppStore((state) => state.setPreviewBackView);
 
   const handleDelete = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const confirmed = window.confirm(`Delete "${document.filename}"?`);
+    const confirmed = await window.electron.showConfirmDialog(
+      `Delete "${document.filename}" from session?`,
+      'Delete Document'
+    );
     if (!confirmed) return;
 
     const result = await window.electron.deleteFile(document.id);
@@ -40,15 +45,10 @@ function SortableDocumentCard({ document }: { document: DocumentItem }) {
     }
   };
 
-  const handlePreview = async () => {
-    if (document.type === 'PDF') {
-      const result = await window.electron.previewPdf(document.id);
-      if (!result.success) {
-        toast.error(result.error.message);
-      }
-    } else {
-      openModal(ModalType.DOCUMENT_PREVIEW, document.id);
-    }
+  const handlePreview = () => {
+    setSelectedDocument(document.id);
+    setPreviewBackView(AppView.DOCUMENT_LIST);
+    setView(AppView.PREVIEW);
   };
 
   return (
@@ -92,12 +92,14 @@ function DocumentListScreen() {
   };
 
   const handleClearAll = async () => {
-    const confirmed = window.confirm('Clear all documents? This cannot be undone.');
+    const confirmed = await window.electron.showConfirmDialog(
+      'Remove all documents from this session? This cannot be undone.',
+      'Clear All Documents'
+    );
     if (!confirmed) return;
 
-    // Delete all documents
     for (const doc of documents) {
-      await window.electron.deleteFile(doc.id);
+      await window.electron.deleteFile(doc.id).catch(() => {});
     }
 
     clearDocuments();

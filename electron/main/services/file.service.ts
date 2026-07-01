@@ -1,12 +1,12 @@
-import { copyFile, unlink, writeFile, stat } from 'fs/promises';
+import { copyFile, unlink, writeFile, stat, readFile } from 'fs/promises';
 import { basename } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
-import { DocumentItem, DocumentType } from '../../../src/types/Document.types';
+import { DocumentItem, DocumentType, PlacedSignature } from '../../../src/types/Document.types';
 import { getTempFilePath } from '../utils/tempDir';
 import { sanitizeFilename } from '../../../src/utils/sanitizeFilename';
-// import { generatePdfThumbnail } from '../utils/pdfThumbnail'; // Disabled - canvas not available
+import { generatePdfThumbnail } from '../utils/pdfThumbnail';
 import { PdfService } from './pdf.service';
 
 /**
@@ -174,25 +174,27 @@ export class FileService {
     id: string,
     type: DocumentType
   ): Promise<string | undefined> {
-    // Only generate thumbnails for images (PDFs disabled due to canvas dependency)
-    if (type !== DocumentType.IMAGE) {
-      return undefined;
-    }
-
     try {
       const thumbnailPath = getTempFilePath(`${id}_thumb.jpg`);
 
-      // Generate image thumbnail using Sharp
-      await sharp(filePath)
-        .resize(120, 160, {
-          fit: 'cover',
-          position: 'top',
-        })
-        .jpeg({ quality: 80 })
-        .toFile(thumbnailPath);
-
-      console.log(`Generated thumbnail for ${type}: ${thumbnailPath}`);
-      return thumbnailPath;
+      if (type === DocumentType.IMAGE) {
+        // Generate image thumbnail using Sharp
+        await sharp(filePath)
+          .resize(120, 160, {
+            fit: 'cover',
+            position: 'top',
+          })
+          .jpeg({ quality: 80 })
+          .toFile(thumbnailPath);
+        console.log(`Generated thumbnail for IMAGE: ${thumbnailPath}`);
+        return thumbnailPath;
+      } else if (type === DocumentType.PDF) {
+        // Generate PDF thumbnail using canvas PDF.js
+        await generatePdfThumbnail(filePath, thumbnailPath, 120, 160);
+        console.log(`Generated thumbnail for PDF: ${thumbnailPath}`);
+        return thumbnailPath;
+      }
+      return undefined;
     } catch (error) {
       console.error('Failed to create thumbnail:', error);
       return undefined;
@@ -221,7 +223,13 @@ export class FileService {
   /**
    * Update a document's file content and regenerate its thumbnail
    */
-  async updateDocumentFile(id: string, fileBuffer: Buffer): Promise<Result<DocumentItem>> {
+  async updateDocumentFile(
+    id: string,
+    fileBuffer: Buffer,
+    cleanFileBuffer?: Buffer,
+    signatures?: PlacedSignature[],
+    pageNumber: number = 1
+  ): Promise<Result<DocumentItem>> {
     try {
       const document = FileService.documents.get(id);
       if (!document) {
@@ -243,26 +251,68 @@ export class FileService {
       const sanitized = sanitizeFilename(basename(document.filename));
       const newTempPath = getTempFilePath(`${newId}_${sanitized}`);
 
-      // Write to new path (never locked)
-      await writeFile(newTempPath, fileBuffer);
+      // If document is a PDF, replace the specific page inside the existing PDF
+      let finalBuffer = fileBuffer;
+      if (document.type === DocumentType.PDF) {
+        try {
+          const { PDFDocument } = await import('pdf-lib');
+          // Load the current PDF file contents
+          const currentPdfBytes = await readFile(oldTempPath);
+          const pdfDoc = await PDFDocument.load(currentPdfBytes, { ignoreEncryption: true });
+          
+          // Embed the edited page image
+          const image = await pdfDoc.embedJpg(fileBuffer);
+          const pageIndex = pageNumber - 1;
+          
+          // Insert the new page at the correct index
+          const newPage = pdfDoc.insertPage(pageIndex, [image.width, image.height]);
+          newPage.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+          
+          // Remove the old page (which has now shifted to index pageIndex + 1)
+          if (pdfDoc.getPageCount() > pageIndex + 1) {
+            pdfDoc.removePage(pageIndex + 1);
+          }
+          
+          const pdfBytes = await pdfDoc.save();
+          finalBuffer = Buffer.from(pdfBytes);
+        } catch (err) {
+          console.error('Failed to replace PDF page:', err);
+        }
+      }
 
-      // Re-generate thumbnail on a new path
-      let newThumbnailPath: string | undefined = undefined;
-      if (document.type === DocumentType.IMAGE) {
-        newThumbnailPath = getTempFilePath(`${newId}_thumb.jpg`);
-        await sharp(newTempPath)
-          .resize(120, 160, {
-            fit: 'cover',
-            position: 'top',
-          })
-          .jpeg({ quality: 80 })
-          .toFile(newThumbnailPath);
+      // Write to new path (never locked)
+      await writeFile(newTempPath, finalBuffer);
+
+      // Re-generate thumbnail on a new path (always uses the first page for the thumbnail)
+      const newThumbnailPath = await this.createThumbnail(newTempPath, newId, document.type);
+
+      // Handle clean image if provided, mapping by page number
+      if (cleanFileBuffer) {
+        const cleanId = uuidv4();
+        const baseName = sanitized.replace(/\.pdf$/i, '');
+        const pageCleanPath = getTempFilePath(`${cleanId}_clean_${baseName}_page_${pageNumber}.jpg`);
+        await writeFile(pageCleanPath, cleanFileBuffer);
+
+        if (!document.cleanTempPaths) {
+          document.cleanTempPaths = {};
+        }
+
+        // Clean up previous clean image for this page if it existed
+        const oldPageCleanPath = document.cleanTempPaths[pageNumber];
+        if (oldPageCleanPath) {
+          unlink(oldPageCleanPath).catch(() => {});
+        }
+
+        document.cleanTempPaths[pageNumber] = pageCleanPath;
       }
 
       // Update document properties with new paths
       document.tempPath = newTempPath;
       if (newThumbnailPath) {
         document.thumbnailPath = newThumbnailPath;
+      }
+      if (signatures) {
+        document.signatures = signatures;
       }
 
       // Update file stats

@@ -1,10 +1,17 @@
 import { dialog } from 'electron';
-import { join } from 'path';
+import { join, basename } from 'path';
+import { copyFile, unlink, stat } from 'fs/promises';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
 import { OutputOptions, ProcessingResult, OutputFormat } from '../../../src/types/Output.types';
+import { RecentFile } from '../../../src/types/Document.types';
 import { PdfService } from './pdf.service';
 import { FileService } from './file.service';
 import { sanitizeFilename } from '../../../src/utils/sanitizeFilename';
+import { getTempFilePath } from '../utils/tempDir';
+import Store from 'electron-store';
+
+const store = new Store<{ recentFiles: RecentFile[] }>();
+const MAX_RECENT_FILES = 20;
 
 /**
  * Service for output processing
@@ -101,7 +108,8 @@ export class OutputService {
 
       // 2.5 Process Split PDF if splitPoints are provided
       if (isSplit) {
-        const splitResult = await this.pdfService.split(documents[0].id, options.splitPoints!);
+        const splitResult = await this.pdfService.splitFile(documents[0].tempPath, options.splitPoints!);
+
         if (!splitResult.success) {
           return {
             success: false,
@@ -109,8 +117,7 @@ export class OutputService {
           };
         }
 
-        const { copyFile, unlink } = await import('fs/promises');
-        const { basename } = require('path');
+
 
         for (const tempPath of splitResult.data) {
           const fileName = basename(tempPath);
@@ -133,7 +140,7 @@ export class OutputService {
 
       // 3. Process PDF (Merge or Single)
       let finalTempPath = documents[0].tempPath;
-      const { copyFile, unlink, stat } = await import('fs/promises');
+
 
       const needsMergeOrConversion = 
         documents.length > 1 || 
@@ -141,7 +148,6 @@ export class OutputService {
 
       if (needsMergeOrConversion) {
         const documentPaths = documents.map((doc) => doc.tempPath);
-        const { getTempFilePath } = await import('../utils/tempDir');
         const mergeTempPath = getTempFilePath(`merged_${Date.now()}.pdf`);
         const mergeResult = await this.pdfService.merge(documentPaths, mergeTempPath);
 
@@ -151,19 +157,30 @@ export class OutputService {
         finalTempPath = mergeTempPath;
       }
 
-      // 4. Compress if requested
-      if (options.targetSize) {
-        const compressResult = await this.pdfService.compressFile(finalTempPath, options.targetSize);
+      // 4. Compress if explicitly requested (compress workflow) or if a target size is given
+      if (options.compress || options.targetSize) {
+        let targetSize = options.targetSize;
+        if (options.compressionLevel && !targetSize) {
+          const origSize = documents.reduce((sum, d) => sum + d.size, 0);
+          const ratio = options.compressionLevel === 'low' ? 0.8
+            : options.compressionLevel === 'medium' ? 0.5
+            : options.compressionLevel === 'high' ? 0.3
+            : 0.15;
+          targetSize = origSize * ratio;
+        }
+
+        const compressResult = await this.pdfService.compressFile(finalTempPath, targetSize);
         if (!compressResult.success) {
           return compressResult as Result<ProcessingResult>;
         }
-        
-        // Clean up intermediate merged file if we compressed it
+        // Clean up intermediate merged/uncompressed file before replacing reference
         if (finalTempPath !== documents[0].tempPath) {
           await unlink(finalTempPath).catch(() => {});
         }
         finalTempPath = compressResult.data;
       }
+
+
 
       // 4.5 Protect if requested
       if (options.protection && options.protection.enabled) {
@@ -183,18 +200,33 @@ export class OutputService {
         finalTempPath = protectResult.data;
       }
 
-      // 5. Final Save
+      // 5. Final Save — copy temp → user destination
       await copyFile(finalTempPath, outputPath);
-      
-      // Clean up final temporary file if it was generated (merged or compressed)
+
+      // Clean up all generated temp files (merged, compressed, protected)
       if (finalTempPath !== documents[0].tempPath) {
         await unlink(finalTempPath).catch(() => {});
       }
 
-      // Calculate output size
+      // Calculate actual output size
       const stats = await stat(outputPath);
 
       this.lastOutputPath = outputPath;
+
+      // Persist to recent files
+      try {
+        const recentEntry: RecentFile = {
+          filename: basename(outputPath),
+          path: outputPath,
+          timestamp: Date.now(),
+          operation: this.detectOperation(options),
+        };
+        const existing = store.get('recentFiles', []);
+        const filtered = existing.filter((f) => f.path !== outputPath);
+        store.set('recentFiles', [recentEntry, ...filtered].slice(0, MAX_RECENT_FILES));
+      } catch {
+        // Non-critical — don't fail the whole operation
+      }
 
       const duration = Date.now() - startTime;
 
@@ -227,29 +259,21 @@ export class OutputService {
   }
 
   /**
-   * Save output to specified path
+   * Save is handled during process() via the native save dialog.
+   * This method exists for IPC compatibility and always returns success.
    */
   async save(_outputPath: string): Promise<Result<void>> {
-    try {
-      // TODO: Implement save logic
-      return {
-        success: false,
-        error: {
-          code: ErrorCode.SAVE_FAILED,
-          message: 'Save functionality not yet implemented',
-          recoverable: false,
-        },
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: {
-          code: ErrorCode.SAVE_FAILED,
-          message: 'Failed to save output',
-          detail: error instanceof Error ? error.message : 'Unknown error',
-          recoverable: true,
-        },
-      };
-    }
+    return { success: true, data: undefined };
+  }
+
+  /**
+   * Determine the operation name for recent files record
+   */
+  private detectOperation(options: OutputOptions): string {
+    if (options.splitPoints && options.splitPoints.length > 0) return 'split';
+    if (options.protection?.enabled) return 'protect';
+    if (options.compress || options.targetSize) return 'compress';
+    if (options.mergeAsSingle) return 'merge';
+    return 'convert';
   }
 }

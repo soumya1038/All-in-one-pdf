@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
+import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
 import { AppView, ModalType, WorkflowType } from '../types/UI.types';
+import { OutputFormat } from '../types/Output.types';
 import { ScannerStatus } from '../types/Scanner.types';
 
 /**
@@ -11,103 +13,151 @@ export function useKeyboardShortcuts() {
   const modal = useAppStore((state) => state.ui.modal);
   const isLoading = useAppStore((state) => state.ui.isLoading);
   const scannerStatus = useAppStore((state) => state.scannerStatus.status);
-  const setView = useAppStore((state) => state.setView);
-  const openModal = useAppStore((state) => state.openModal);
-  const closeModal = useAppStore((state) => state.closeModal);
-  const documents = useAppStore((state) => state.documents);
   const activeWorkflow = useAppStore((state) => state.ui.activeWorkflow);
 
-  const isProcessing = 
-    currentView === AppView.PROCESSING || 
-    isLoading || 
-    scannerStatus === ScannerStatus.SCANNING || 
+  const isProcessing =
+    currentView === AppView.PROCESSING ||
+    isLoading ||
+    scannerStatus === ScannerStatus.SCANNING ||
     scannerStatus === ScannerStatus.CHECKING ||
-    (activeWorkflow !== WorkflowType.NONE && documents.length > 0);
+    (activeWorkflow !== WorkflowType.NONE && useAppStore.getState().documents.length > 0);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore all shortcuts if a process is active
       if (isProcessing) return;
 
-      // Escape - close modal
+      // Escape — close modal
       if (e.key === 'Escape' && modal.type !== ModalType.NONE) {
-        closeModal();
+        e.preventDefault();
+        useAppStore.getState().closeModal();
         return;
       }
 
-      // Ctrl+O - Upload files
-      if (e.ctrlKey && e.key === 'o') {
+      // ── Ctrl+O — Open files (Home screen) ─────────────────────────────────
+      if (e.ctrlKey && !e.shiftKey && e.key === 'o') {
         e.preventDefault();
         if (currentView === AppView.HOME) {
-          // Trigger file input
           document.getElementById('file-input')?.click();
         }
         return;
       }
 
-      // Ctrl+Shift+S - Scan
+      // ── Ctrl+Shift+S — Scan ────────────────────────────────────────────────
       if (e.ctrlKey && e.shiftKey && e.key === 'S') {
         e.preventDefault();
-        openModal(ModalType.SCANNER);
+        useAppStore.getState().openModal(ModalType.SCANNER);
         return;
       }
 
-      // Ctrl+M - Merge PDFs
-      if (e.ctrlKey && e.key === 'm') {
+      // ── Ctrl+M — Merge PDFs ───────────────────────────────────────────────
+      if (e.ctrlKey && !e.shiftKey && e.key === 'm') {
         e.preventDefault();
-        // TODO: Navigate to merge
+        const state = useAppStore.getState();
+        const docs = state.documents;
+        if (docs.length === 0) {
+          // No documents — let sidebar handle the upload flow
+          toast('Use the sidebar "Merge PDFs" button to upload files first.', { icon: 'ℹ️' });
+          return;
+        }
+        const allPdfs = docs.every((d) => d.type === 'PDF');
+        if (!allPdfs) {
+          toast.error('Merge requires all documents to be PDFs.');
+          return;
+        }
+        state.setActiveWorkflow(WorkflowType.MERGE);
+        state.updateOutputOptions({ mergeAsSingle: true, format: OutputFormat.PDF });
+        state.setView(AppView.DOCUMENT_LIST);
         return;
       }
 
-      // Ctrl+Shift+C - Compress PDF
+      // ── Ctrl+Shift+C — Compress PDF ───────────────────────────────────────
       if (e.ctrlKey && e.shiftKey && e.key === 'C') {
         e.preventDefault();
-        // TODO: Navigate to compress
+        const state = useAppStore.getState();
+        const docs = state.documents;
+        if (docs.length === 0) {
+          toast('Use the sidebar "Compress PDF" button to upload a file first.', { icon: 'ℹ️' });
+          return;
+        }
+        if (docs.length !== 1 || docs[0].type !== 'PDF') {
+          toast.error('Compress requires exactly one PDF document.');
+          return;
+        }
+        state.setActiveWorkflow(WorkflowType.COMPRESS);
+        state.updateOutputOptions({ format: OutputFormat.PDF });
+        state.setView(AppView.OUTPUT_OPTIONS);
         return;
       }
 
-      // Ctrl+E - Convert
-      if (e.ctrlKey && e.key === 'e') {
+      // ── Ctrl+E — Convert ─────────────────────────────────────────────────
+      if (e.ctrlKey && !e.shiftKey && e.key === 'e') {
         e.preventDefault();
-        // TODO: Navigate to convert
+        const state = useAppStore.getState();
+        const docs = state.documents;
+        if (docs.length === 0) {
+          toast('Use the sidebar "Convert Format" button to upload a file first.', { icon: 'ℹ️' });
+          return;
+        }
+        if (docs.length !== 1) {
+          toast.error('Convert requires exactly one document.');
+          return;
+        }
+        state.setActiveWorkflow(WorkflowType.CONVERT);
+        state.setView(AppView.OUTPUT_OPTIONS);
         return;
       }
 
-      // Ctrl+Z - Undo (reorder)
-      if (e.ctrlKey && e.key === 'z') {
+      // ── Ctrl+Shift+P — Split PDF ─────────────────────────────────────────
+      if (e.ctrlKey && e.shiftKey && e.key === 'P') {
         e.preventDefault();
-        // TODO: Implement undo
+        const state = useAppStore.getState();
+        const docs = state.documents;
+        if (docs.length === 0) {
+          toast('Use the sidebar "Split PDF" button to upload a file first.', { icon: 'ℹ️' });
+          return;
+        }
+        if (docs.length !== 1 || docs[0].type !== 'PDF') {
+          toast.error('Split requires exactly one PDF document.');
+          return;
+        }
+        state.setActiveWorkflow(WorkflowType.SPLIT);
+        state.updateOutputOptions({ format: OutputFormat.PDF });
+        state.setView(AppView.OUTPUT_OPTIONS);
         return;
       }
 
-      // Delete - Delete selected document
-      if (e.key === 'Delete') {
-        // TODO: Delete selected document
-        return;
-      }
-
-      // Space - Preview document
-      if (e.key === ' ' && currentView === AppView.DOCUMENT_LIST) {
+      // ── Ctrl+Shift+L — Protect PDF ────────────────────────────────────────
+      if (e.ctrlKey && e.shiftKey && e.key === 'L') {
         e.preventDefault();
-        // TODO: Open preview
+        const state = useAppStore.getState();
+        const docs = state.documents;
+        if (docs.length === 0) {
+          toast('Use the sidebar "Protect PDF" button to upload a file first.', { icon: 'ℹ️' });
+          return;
+        }
+        if (docs.length !== 1 || docs[0].type !== 'PDF') {
+          toast.error('Protect requires exactly one PDF document.');
+          return;
+        }
+        state.setActiveWorkflow(WorkflowType.PROTECT);
+        state.updateOutputOptions({ format: OutputFormat.PDF, protection: { enabled: true } });
+        state.setView(AppView.OUTPUT_OPTIONS);
         return;
       }
 
-      // Ctrl+S - Save output
-      if (e.ctrlKey && e.key === 's') {
+      // ── Ctrl+S — Trigger process (from Output Options screen) ─────────────
+      if (e.ctrlKey && !e.shiftKey && e.key === 's') {
         e.preventDefault();
         if (currentView === AppView.OUTPUT_OPTIONS) {
-          // Trigger process
-          setView(AppView.PROCESSING);
+          useAppStore.getState().setView(AppView.PROCESSING);
         }
         return;
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [currentView, modal, setView, openModal, closeModal, isProcessing]);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentView, modal, isProcessing]);
 }

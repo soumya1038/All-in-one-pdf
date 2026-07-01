@@ -172,12 +172,6 @@ function HomeScreen() {
              )}
            </div>
 
-          {/* Keyboard Shortcut Hint */}
-          <div className="mt-6 text-center">
-            <p className="text-sm text-text-muted">
-              Tip: Press <kbd className="px-2 py-1 bg-bg-sunken border border-border rounded text-xs font-mono">Ctrl+O</kbd> to browse files
-            </p>
-          </div>
         </div>
       </div>
 

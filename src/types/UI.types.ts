@@ -7,6 +7,7 @@ export enum AppView {
   OUTPUT_OPTIONS = 'OUTPUT_OPTIONS',
   PROCESSING = 'PROCESSING',
   SUCCESS = 'SUCCESS',
+  PREVIEW = 'PREVIEW',
 }
 
 /**
@@ -53,4 +54,5 @@ export interface UIState {
   isLoading: boolean;
   loadingMessage?: string;
   activeWorkflow: WorkflowType;
+  previewBackView?: AppView;
 }

@@ -58,12 +58,18 @@ const api: IpcApi = {
     ipcRenderer.invoke(IpcChannel.OUTPUT_SAVE, outputPath),
 
   // Document operations
-  applyDocumentEdit: (documentId, base64Data) =>
-    ipcRenderer.invoke(IpcChannel.DOCUMENT_APPLY_EDIT, { documentId, base64Data }),
+  applyDocumentEdit: (documentId, base64Data, cleanBase64Data, signatures, pageNumber) =>
+    ipcRenderer.invoke(IpcChannel.DOCUMENT_APPLY_EDIT, { documentId, base64Data, cleanBase64Data, signatures, pageNumber }),
+
+  renderPdfPage: (documentId, pageNumber) =>
+    ipcRenderer.invoke(IpcChannel.DOCUMENT_RENDER_PDF_PAGE, { documentId, pageNumber }),
 
   // System operations
   getRecentFiles: () =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_GET_RECENT),
+
+  addRecentFile: (file) =>
+    ipcRenderer.invoke(IpcChannel.SYSTEM_ADD_RECENT, file),
 
   clearTemp: () =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_CLEAR_TEMP),
@@ -71,14 +77,22 @@ const api: IpcApi = {
   openFile: (filePath) =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_OPEN_FILE, filePath),
 
-  openFolder: (folderPath) =>
-    ipcRenderer.invoke(IpcChannel.SYSTEM_OPEN_FOLDER, folderPath),
+  openFolder: (filePath) =>
+    ipcRenderer.invoke(IpcChannel.SYSTEM_OPEN_FOLDER, filePath),
 
   showOpenDialog: (options) =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_SHOW_OPEN_DIALOG, options),
 
   printDocument: (documentId) =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_PRINT, documentId),
+
+  showConfirmDialog: (message, title) =>
+    ipcRenderer.invoke(IpcChannel.SYSTEM_DIALOG_CONFIRM, message, title),
+
+  // Window controls (fire-and-forget — no return value needed)
+  minimizeWindow: () => ipcRenderer.send(IpcChannel.WINDOW_MINIMIZE),
+  maximizeWindow: () => ipcRenderer.send(IpcChannel.WINDOW_MAXIMIZE),
+  closeWindow:    () => ipcRenderer.send(IpcChannel.WINDOW_CLOSE),
 };
 
 /**

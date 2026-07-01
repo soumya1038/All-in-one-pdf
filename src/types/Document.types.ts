@@ -21,6 +21,16 @@ export interface DocumentEdit {
 /**
  * Core document item in the application session
  */
+export interface PlacedSignature {
+  id: string;
+  x: number;      // percentage (0-100)
+  y: number;      // percentage (0-100)
+  width: number;  // percentage (0-100)
+  height: number; // percentage (0-100)
+  imgSrc: string; // Base64 image data URL
+  page: number;   // 1-indexed page number
+}
+
 export interface DocumentItem {
   id: string;                    // UUID
   filename: string;              // Original filename
@@ -32,6 +42,8 @@ export interface DocumentItem {
   originalPath: string;          // Original upload path (never modified)
   edits: DocumentEdit[];         // Applied edits
   createdAt: number;             // Timestamp
+  cleanTempPaths?: Record<number, string>; // Maps page number (1-indexed) to temp clean image path
+  signatures?: PlacedSignature[]; // Persisted signature coordinates and images
 }
 
 /**

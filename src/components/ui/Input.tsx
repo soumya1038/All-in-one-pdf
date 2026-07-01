@@ -28,7 +28,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     const inputId = id || `input-${Math.random().toString(36).substr(2, 9)}`;
 
     const baseStyles =
-      'px-3 py-2 text-base bg-bg-sunken border rounded-sm transition-fast focus:outline-none focus:ring-2 focus:ring-border-focus disabled:opacity-40 disabled:cursor-not-allowed';
+      'px-3 py-2 text-base bg-bg-surface border rounded-sm transition-fast focus:outline-none focus:ring-2 focus:ring-border-focus disabled:opacity-40 disabled:cursor-not-allowed';
 
     const stateStyles = error
       ? 'border-error focus:border-error'

@@ -11,7 +11,9 @@ import { ScannerDevice, ScanColorMode, ScanPaperSize } from '../../types/Scanner
 function ScannerModal() {
   const modal = useAppStore((state) => state.ui.modal);
   const closeModal = useAppStore((state) => state.closeModal);
-  const addDocument = useAppStore((state) => state.addDocument);
+  const addDocuments = useAppStore((state) => state.addDocuments);
+  const setView = useAppStore((state) => state.setView);
+  const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
 
   const [isScanning, setIsScanning] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
@@ -61,17 +63,21 @@ function ScannerModal() {
 
       if (result.success) {
         toast.success('Scan completed successfully');
-        
-        // Upload the scanned image to the app
+
+        // Upload the scanned image so the main process validates and temp-copies it
         const uploadResult = await window.electron.uploadFiles([result.data.imagePath]);
         if (uploadResult.success && uploadResult.data.length > 0) {
-          addDocument(uploadResult.data[0]);
-          useAppStore.getState().setView(AppView.DOCUMENT_LIST);
+          // Add to store and navigate to document list so user can choose workflow
+          addDocuments(uploadResult.data);
+          // Reset workflow so user picks what they want to do with the scanned page
+          setActiveWorkflow(useAppStore.getState().ui.activeWorkflow); // keep current or NONE
+          closeModal();
+          setView(AppView.DOCUMENT_LIST);
         } else if (!uploadResult.success) {
-          toast.error(uploadResult.error.message);
+          toast.error('Scan completed but could not import image: ' + uploadResult.error.message);
+        } else {
+          toast.error('Scan completed but no image was returned');
         }
-        
-        closeModal();
       } else {
         toast.error(result.error.message);
       }

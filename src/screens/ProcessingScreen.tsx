@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
@@ -11,51 +11,46 @@ function ProcessingScreen() {
   const documents = useAppStore((state) => state.documents);
   const outputOptions = useAppStore((state) => state.outputOptions);
   const setView = useAppStore((state) => state.setView);
-  const addRecentFile = useAppStore((state) => state.addRecentFile);
+  const setProcessingStatus = useAppStore((state) => state.setProcessingStatus);
 
   const [currentStep, setCurrentStep] = useState<ProcessingStep>(ProcessingStep.VALIDATING);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  // Track whether processing has started — prevents double-execution in StrictMode
+  const hasStarted = useRef(false);
+
   const steps = [
-    { step: ProcessingStep.VALIDATING, label: 'Validating documents' },
-    { step: ProcessingStep.APPLYING_EDITS, label: 'Applying edits' },
-    { step: ProcessingStep.COMPRESSING, label: 'Compressing' },
-    { step: ProcessingStep.CONVERTING, label: 'Converting format' },
-    { step: ProcessingStep.SAVING, label: 'Saving output' },
-    { step: ProcessingStep.COMPLETE, label: 'Complete' },
+    { step: ProcessingStep.VALIDATING,    label: 'Validating documents' },
+    { step: ProcessingStep.APPLYING_EDITS,label: 'Applying edits' },
+    { step: ProcessingStep.COMPRESSING,   label: 'Processing' },
+    { step: ProcessingStep.CONVERTING,    label: 'Converting format' },
+    { step: ProcessingStep.SAVING,        label: 'Saving output' },
+    { step: ProcessingStep.COMPLETE,      label: 'Complete' },
   ];
 
   useEffect(() => {
+    if (hasStarted.current) return;
+    hasStarted.current = true;
+
     const processDocuments = async () => {
       try {
-        // Step 1: Validating
         setCurrentStep(ProcessingStep.VALIDATING);
         setProgress(10);
         await new Promise((resolve) => setTimeout(resolve, 300));
 
-        // Step 2: Applying edits
         setCurrentStep(ProcessingStep.APPLYING_EDITS);
         setProgress(30);
         await new Promise((resolve) => setTimeout(resolve, 300));
 
-        // Step 3: Compressing (if needed)
-        if (outputOptions.targetSize) {
-          setCurrentStep(ProcessingStep.COMPRESSING);
-          setProgress(50);
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-
-        // Step 4: Converting
-        setCurrentStep(ProcessingStep.CONVERTING);
-        setProgress(70);
+        setCurrentStep(ProcessingStep.COMPRESSING);
+        setProgress(55);
         await new Promise((resolve) => setTimeout(resolve, 300));
 
-        // Step 5: Saving
         setCurrentStep(ProcessingStep.SAVING);
-        setProgress(85);
+        setProgress(80);
 
-        // Call IPC to process output
+        // Call backend to process documents
         const documentIds = documents.map((d) => d.id);
         const result = await window.electron.processOutput(documentIds, outputOptions);
 
@@ -63,49 +58,55 @@ function ProcessingScreen() {
           setProgress(100);
           setCurrentStep(ProcessingStep.COMPLETE);
 
-          // Add to recent files
-          addRecentFile({
-            filename: outputOptions.filename,
-            path: result.data.outputPath,
-            timestamp: Date.now(),
-            operation: 'Processed',
+          // Store output path & size in the store so SuccessScreen can read them
+          // Use the store action to avoid calling setState inside a component
+          setProcessingStatus({
+            step: ProcessingStep.COMPLETE,
+            progress: 100,
+            totalFiles: documents.length,
+            processedFiles: documents.length,
+            outputPath: result.data.outputPath,
+            outputSize: result.data.outputSize,
           });
+
+          // Also persist to recent files via IPC so it survives restart
+          try {
+            const filename = result.data.outputPath.split(/[\\/]/).pop() || outputOptions.filename;
+            await window.electron.addRecentFile({
+              filename,
+              path: result.data.outputPath,
+              timestamp: Date.now(),
+              operation: outputOptions.mergeAsSingle ? 'merge'
+                : (outputOptions.compress || outputOptions.targetSize) ? 'compress'
+                : outputOptions.protection?.enabled ? 'protect'
+                : outputOptions.splitPoints?.length ? 'split'
+                : 'convert',
+            });
+          } catch {
+            // Non-critical
+          }
 
           toast.success('Processing complete!');
 
-          // Store output path in state for SuccessScreen
-          useAppStore.setState({ 
-            processingStatus: { 
-              step: ProcessingStep.COMPLETE,
-              progress: 100,
-              totalFiles: documents.length,
-              processedFiles: documents.length,
-            } 
-          });
-
-          // Navigate to success screen after a brief delay
-          setTimeout(() => {
-            setView(AppView.SUCCESS);
-          }, 1000);
+          setTimeout(() => setView(AppView.SUCCESS), 1000);
         } else {
           setError(result.error.message);
           setCurrentStep(ProcessingStep.ERROR);
           toast.error(result.error.message);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Processing failed');
+        const msg = err instanceof Error ? err.message : 'Processing failed';
+        setError(msg);
         setCurrentStep(ProcessingStep.ERROR);
         toast.error('Processing failed');
       }
     };
 
     processDocuments();
-  }, [documents, outputOptions, setView, addRecentFile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleCancel = () => {
-    // TODO: Implement cancellation
-    setView(AppView.OUTPUT_OPTIONS);
-  };
+  const handleCancel = () => setView(AppView.OUTPUT_OPTIONS);
 
   const getStepIcon = (step: ProcessingStep) => {
     const stepIndex = steps.findIndex((s) => s.step === step);
@@ -114,22 +115,19 @@ function ProcessingScreen() {
     if (currentStep === ProcessingStep.ERROR) {
       return <XCircle size={20} className="text-error" />;
     }
-
     if (stepIndex < currentStepIndex || currentStep === ProcessingStep.COMPLETE) {
       return <CheckCircle2 size={20} className="text-success" />;
     }
-
     if (stepIndex === currentStepIndex) {
       return <Loader2 size={20} className="animate-spin text-accent" />;
     }
-
     return <div className="w-5 h-5 rounded-full border-2 border-border" />;
   };
 
   return (
     <div className="h-full flex items-center justify-center p-12">
       <div className="w-full max-w-2xl">
-        <div className="bg-bg-surface rounded-xl border border-border p-8 space-y-8">
+        <div className="bg-bg-surface rounded-xl border border-border p-8 space-y-8 animate-fade-in">
           {/* Header */}
           <div className="text-center">
             <h1 className="text-2xl font-semibold text-text-primary mb-2">
@@ -172,6 +170,7 @@ function ProcessingScreen() {
           {/* Error Message */}
           {error && (
             <div className="p-4 bg-error-light border border-error rounded-md">
+              <p className="text-sm text-error font-medium mb-1">Error</p>
               <p className="text-sm text-error">{error}</p>
             </div>
           )}

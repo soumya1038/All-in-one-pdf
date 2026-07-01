@@ -1,5 +1,5 @@
-import { app, BrowserWindow } from 'electron';
-import { join } from 'path';
+import { app, BrowserWindow, protocol } from 'electron';
+import { join, normalize } from 'path';
 import { createMainWindow } from './window';
 import { registerIpcHandlers } from './ipc';
 import { initTempDir, cleanupTempDir } from './utils/tempDir';
@@ -22,7 +22,7 @@ async function createWindow() {
   // Load the app
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+    // DevTools available via Ctrl+Shift+I; don't auto-open to avoid flash before content loads
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
   }
@@ -35,8 +35,8 @@ async function createWindow() {
 
 /**
  * Register custom protocol schemes before app is ready
+ * Must be called BEFORE app.whenReady()
  */
-const { protocol } = require('electron');
 protocol.registerSchemesAsPrivileged([
   { scheme: 'docuflow', privileges: { bypassCSP: true, standard: true, secure: true, supportFetchAPI: true } }
 ]);
@@ -48,6 +48,15 @@ app.whenReady().then(() => {
   // Register custom protocol for serving local files
   protocol.registerFileProtocol('docuflow', (request: any, callback: any) => {
     let urlPath = request.url.replace('docuflow://', '');
+    // Strip query parameters and hash fragments
+    const queryIndex = urlPath.indexOf('?');
+    if (queryIndex !== -1) {
+      urlPath = urlPath.substring(0, queryIndex);
+    }
+    const hashIndex = urlPath.indexOf('#');
+    if (hashIndex !== -1) {
+      urlPath = urlPath.substring(0, hashIndex);
+    }
     try {
       let resolvedPath = decodeURIComponent(urlPath);
       
@@ -62,7 +71,6 @@ app.whenReady().then(() => {
         resolvedPath = resolvedPath[0] + ':/' + resolvedPath.slice(2);
       }
       
-      const { normalize } = require('path');
       resolvedPath = normalize(resolvedPath);
       
       console.log(`Custom protocol: resolved ${request.url} to ${resolvedPath}`);

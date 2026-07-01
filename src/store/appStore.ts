@@ -42,6 +42,10 @@ interface AppState {
   setLoading: (isLoading: boolean, message?: string) => void;
   setSelectedDocument: (id?: string) => void;
   setActiveWorkflow: (workflow: WorkflowType) => void;
+  setPreviewBackView: (view?: AppView) => void;
+  sessionSignatures: string[];
+  addSessionSignature: (signature: string) => void;
+  clearSessionSignatures: () => void;
 }
 
 /**
@@ -51,6 +55,8 @@ const defaultOutputOptions: OutputOptions = {
   filename: `DocuFlow_Output_${new Date().toISOString().split('T')[0]}`,
   format: OutputFormat.PDF,
   targetSize: undefined,
+  compress: false,
+  compressionLevel: 'medium',
   pdfPageSize: PdfPageSize.A4,
   imageDpi: 300,
   protection: {
@@ -122,9 +128,22 @@ export const useAppStore = create<AppState>((set) => ({
       return { documents: result };
     }),
 
+  sessionSignatures: [],
+
+  addSessionSignature: (signature) =>
+    set((state) => {
+      // Check if signature already exists in sessionSignatures to prevent duplicates
+      if (state.sessionSignatures.includes(signature)) return {};
+      return { sessionSignatures: [...state.sessionSignatures, signature] };
+    }),
+
+  clearSessionSignatures: () =>
+    set({ sessionSignatures: [] }),
+
   clearDocuments: () =>
     set((state) => ({
       documents: [],
+      sessionSignatures: [],
       ui: { ...state.ui, activeWorkflow: WorkflowType.NONE },
     })),
 
@@ -191,5 +210,10 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveWorkflow: (workflow) =>
     set((state) => ({
       ui: { ...state.ui, activeWorkflow: workflow },
+    })),
+
+  setPreviewBackView: (view) =>
+    set((state) => ({
+      ui: { ...state.ui, previewBackView: view },
     })),
 }));

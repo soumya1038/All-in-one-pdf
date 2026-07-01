@@ -11,21 +11,21 @@ function SuccessScreen() {
   const clearDocuments = useAppStore((state) => state.clearDocuments);
   const setView = useAppStore((state) => state.setView);
 
-  // Get output path from recent files (last added)
-  const recentFiles = useAppStore((state) => state.recentFiles);
-  const lastFile = recentFiles[0];
-  
-  const outputPath = lastFile?.path || '';
-  // Extract filename from path (works on Windows paths)
-  const outputFilename = outputPath ? outputPath.split('\\').pop() || outputPath.split('/').pop() || outputPath : `${outputOptions.filename}.${outputOptions.format.toLowerCase()}`;
-  const outputSize = documents.reduce((sum, doc) => sum + doc.size, 0); // Approximate
+  // Read actual output info from processingStatus (set by ProcessingScreen after IPC completes)
+  const processingStatus = useAppStore((state) => state.processingStatus);
+  const outputPath = processingStatus?.outputPath || '';
+  const outputSize = processingStatus?.outputSize ?? 0;
+
+  // Derive display filename from the real saved path
+  const outputFilename = outputPath
+    ? outputPath.split(/[\\/]/).pop() || outputPath
+    : `${outputOptions.filename}.${outputOptions.format.toLowerCase()}`;
 
   const handleOpenFile = async () => {
     if (!outputPath) {
       toast.error('Output file path not available');
       return;
     }
-    
     const result = await window.electron.openFile(outputPath);
     if (!result.success) {
       toast.error('Failed to open file: ' + result.error.message);
@@ -37,21 +37,16 @@ function SuccessScreen() {
       toast.error('Output file path not available');
       return;
     }
-    
-    // Extract folder path (works on Windows paths)
-    const lastSlash = Math.max(outputPath.lastIndexOf('\\'), outputPath.lastIndexOf('/'));
-    const folderPath = lastSlash > 0 ? outputPath.substring(0, lastSlash) : outputPath;
-    
-    const result = await window.electron.openFolder(folderPath);
+    // Pass the full file path — system.handler will use showItemInFolder(filePath)
+    const result = await window.electron.openFolder(outputPath);
     if (!result.success) {
       toast.error('Failed to open folder: ' + result.error.message);
     }
   };
 
   const handleStartNew = async () => {
-    // Clear all documents
     for (const doc of documents) {
-      await window.electron.deleteFile(doc.id);
+      await window.electron.deleteFile(doc.id).catch(() => {});
     }
     clearDocuments();
     setView(AppView.HOME);
@@ -60,10 +55,10 @@ function SuccessScreen() {
   return (
     <div className="h-full flex items-center justify-center p-12">
       <div className="w-full max-w-2xl">
-        <div className="bg-bg-surface rounded-xl border border-border p-12 text-center space-y-8">
+        <div className="bg-bg-surface rounded-xl border border-border p-12 text-center space-y-8 animate-fade-in">
           {/* Success Icon */}
           <div className="flex justify-center">
-            <div className="w-20 h-20 rounded-full bg-success/10 flex items-center justify-center">
+            <div className="w-20 h-20 rounded-full bg-success-light flex items-center justify-center">
               <CheckCircle2 size={48} className="text-success" />
             </div>
           </div>
@@ -79,17 +74,17 @@ function SuccessScreen() {
           </div>
 
           {/* File Info */}
-          <div className="bg-bg-sunken rounded-md p-6 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-text-secondary">Output File</span>
-              <span className="text-sm font-medium text-text-primary font-mono">
+          <div className="bg-bg-sunken rounded-md p-6 space-y-3 text-left">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-text-secondary shrink-0">Output File</span>
+              <span className="text-sm font-medium text-text-primary font-mono truncate" title={outputFilename}>
                 {outputFilename}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-text-secondary">File Size</span>
               <span className="text-sm font-medium text-text-primary font-mono">
-                {formatFileSize(outputSize)}
+                {outputSize > 0 ? formatFileSize(outputSize) : '—'}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -98,23 +93,40 @@ function SuccessScreen() {
                 {outputOptions.format}
               </span>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-text-secondary">Location</span>
-              <span className="text-sm font-medium text-text-primary font-mono truncate max-w-md" title={outputPath}>
-                {outputPath}
-              </span>
-            </div>
+            {outputPath && (
+              <div className="flex items-start justify-between gap-4 pt-2 border-t border-border">
+                <span className="text-sm text-text-secondary shrink-0">Location</span>
+                <span
+                  className="text-sm font-medium text-text-primary font-mono truncate text-right"
+                  title={outputPath}
+                >
+                  {outputPath}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Actions */}
           <div className="flex flex-col gap-3">
-            <Button variant="primary" size="lg" onClick={handleOpenFile} fullWidth>
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={handleOpenFile}
+              fullWidth
+              disabled={!outputPath}
+            >
               <FileText size={20} />
               Open File
             </Button>
-            <Button variant="secondary" size="lg" onClick={handleOpenFolder} fullWidth>
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={handleOpenFolder}
+              fullWidth
+              disabled={!outputPath}
+            >
               <FolderOpen size={20} />
-              Open Folder
+              Show in Explorer
             </Button>
           </div>
 

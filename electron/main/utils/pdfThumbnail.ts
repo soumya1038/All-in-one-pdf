@@ -1,15 +1,8 @@
 import { readFile, writeFile } from 'fs/promises';
 import { createCanvas } from 'canvas';
 import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
-import { createRequire } from 'module';
 
-const require = createRequire(import.meta.url);
-
-// Configure pdfjs to work in Node.js environment
-// @ts-ignore - pdfjs types don't include GlobalWorkerOptions
-if (pdfjs && pdfjs.GlobalWorkerOptions) {
-  pdfjs.GlobalWorkerOptions.workerSrc = require.resolve('pdfjs-dist/legacy/build/pdf.worker.js');
-}
+// Use fake worker in Node environment (requires no external worker file)
 
 /**
  * Generate a thumbnail from the first page of a PDF
@@ -22,7 +15,8 @@ export async function generatePdfThumbnail(
   pdfPath: string,
   thumbnailPath: string,
   width: number = 120,
-  height: number = 160
+  height: number = 160,
+  pageNumber: number = 1
 ): Promise<void> {
   try {
     // Read PDF file
@@ -33,8 +27,8 @@ export async function generatePdfThumbnail(
     const loadingTask = pdfjs.getDocument({ data });
     const pdf = await loadingTask.promise;
 
-    // Get first page
-    const page = await pdf.getPage(1);
+    // Get specified page
+    const page = await pdf.getPage(pageNumber);
 
     // Calculate scale to fit thumbnail size
     const viewport = page.getViewport({ scale: 1.0 });

@@ -1,4 +1,4 @@
-import { FileText, MoreVertical, GripVertical, File } from 'lucide-react';
+import { FileText, Trash2, GripVertical, File } from 'lucide-react';
 import { DocumentItem } from '../../types/Document.types';
 import { formatFileSize } from '../../utils/formatFileSize';
 
@@ -59,18 +59,18 @@ function DocumentCard({
         </div>
       </div>
 
-      {/* More Actions (visible on hover) */}
+      {/* Delete button (visible on hover) */}
       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-fast z-10">
         <button
-          className="p-1 bg-bg-surface/80 rounded hover:bg-bg-sunken"
+          className="p-1 bg-bg-surface/80 rounded hover:bg-error-light hover:text-error transition-fast"
           onClick={(e) => {
             e.stopPropagation();
-            // TODO: Show context menu
             onDelete?.();
           }}
-          aria-label="More actions"
+          aria-label="Delete document"
+          title="Delete"
         >
-          <MoreVertical size={16} className="text-text-secondary" />
+          <Trash2 size={16} className="text-text-secondary" />
         </button>
       </div>
 

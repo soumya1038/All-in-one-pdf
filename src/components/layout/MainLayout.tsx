@@ -1,4 +1,5 @@
-import { FileText, Minimize2, X } from 'lucide-react';
+import { FileText } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 
 interface MainLayoutProps {
@@ -6,26 +7,63 @@ interface MainLayoutProps {
 }
 
 function MainLayout({ children }: MainLayoutProps) {
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // Track maximize/restore state for the toggle icon
+  useEffect(() => {
+    const handleResize = () => {
+      // screen.availWidth is a reasonable proxy; Electron's ipc could be more accurate
+      // but this avoids an extra IPC round-trip
+      setIsMaximized(window.outerWidth >= screen.availWidth && window.outerHeight >= screen.availHeight);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   return (
     <div className="h-screen w-screen flex flex-col bg-bg-base overflow-hidden">
       {/* Custom Titlebar */}
-      <div className="h-8 bg-bg-surface border-b border-border flex items-center justify-between px-4 select-none drag-region">
-        <div className="flex items-center gap-2">
+      <div className="h-8 bg-bg-surface border-b border-border flex items-center justify-between px-4 select-none drag-region flex-shrink-0">
+        <div className="flex items-center gap-2 no-drag">
           <FileText size={16} className="text-accent" />
           <span className="text-sm font-semibold text-text-primary">DocuFlow</span>
         </div>
-        <div className="flex items-center gap-2">
+
+        {/* Window controls — must be no-drag so clicks register */}
+        <div className="flex items-center no-drag h-full">
           <button
-            className="p-1 hover:bg-bg-sunken rounded transition-fast"
+            onClick={() => window.electron.minimizeWindow()}
+            className="w-[46px] h-8 flex items-center justify-center hover:bg-bg-sunken transition-fast"
             aria-label="Minimize"
           >
-            <Minimize2 size={14} />
+            <svg width="10" height="10" viewBox="0 0 10 10" className="text-text-secondary">
+              <line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" strokeWidth="1" />
+            </svg>
           </button>
           <button
-            className="p-1 hover:bg-error-light rounded transition-fast"
+            onClick={() => { window.electron.maximizeWindow(); setIsMaximized((p) => !p); }}
+            className="w-[46px] h-8 flex items-center justify-center hover:bg-bg-sunken transition-fast"
+            aria-label={isMaximized ? 'Restore' : 'Maximize'}
+          >
+            {isMaximized ? (
+              <svg width="10" height="10" viewBox="0 0 10 10" className="text-text-secondary">
+                <path d="M2.5,1.5 H8.5 V7.5" fill="none" stroke="currentColor" strokeWidth="1" />
+                <rect x="1.5" y="2.5" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            ) : (
+              <svg width="10" height="10" viewBox="0 0 10 10" className="text-text-secondary">
+                <rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            )}
+          </button>
+          <button
+            onClick={() => window.electron.closeWindow()}
+            className="w-[46px] h-8 flex items-center justify-center hover:bg-[#E81123] hover:text-white group transition-fast"
             aria-label="Close"
           >
-            <X size={14} />
+            <svg width="10" height="10" viewBox="0 0 10 10" className="text-text-secondary group-hover:text-white">
+              <path d="M1.5,1.5 L8.5,8.5 M8.5,1.5 L1.5,8.5" fill="none" stroke="currentColor" strokeWidth="1" />
+            </svg>
           </button>
         </div>
       </div>

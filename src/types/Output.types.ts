@@ -36,10 +36,14 @@ export interface PdfProtection {
 /**
  * Output options configuration
  */
+export type CompressionLevel = 'low' | 'medium' | 'high' | 'extreme';
+
 export interface OutputOptions {
   filename: string;
   format: OutputFormat;
   targetSize?: number;          // In bytes, optional for compression
+  compress?: boolean;           // Explicitly run compression (even without a target size)
+  compressionLevel?: CompressionLevel;
   pdfPageSize: PdfPageSize;
   imageDpi: ImageDpi;
   protection: PdfProtection;
@@ -72,6 +76,8 @@ export interface ProcessingStatus {
   processedFiles: number;
   estimatedTimeRemaining?: number; // Seconds
   error?: string;
+  outputPath?: string;          // Final output file path (set on COMPLETE)
+  outputSize?: number;          // Final output file size in bytes (set on COMPLETE)
 }
 
 /**

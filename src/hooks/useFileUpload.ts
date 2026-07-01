@@ -7,7 +7,16 @@ import { AppView, WorkflowType } from '../types/UI.types';
 import { OutputFormat } from '../types/Output.types';
 
 /**
- * Hook for handling file uploads with validation and IPC communication
+ * Hook for handling file uploads with validation and IPC communication.
+ *
+ * BUG FIX (size=0):
+ * Files opened through the native Electron dialog are represented as mock File
+ * objects whose .size is always 0 because the renderer process doesn't actually
+ * read the file bytes — only the main process does.
+ * 
+ * To get the real size, we rely on the DocumentItem returned from the IPC
+ * call (window.electron.uploadFiles), which reads the actual stat() size on
+ * the main side. Session-size warnings are therefore deferred until after IPC.
  */
 export function useFileUpload() {
   const [isUploading, setIsUploading] = useState(false);
@@ -21,14 +30,16 @@ export function useFileUpload() {
     async (files: File[]) => {
       if (files.length === 0) return;
 
-      // 1. Enforce workflow input constraints
-      if (activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.SPLIT || activeWorkflow === WorkflowType.PROTECT) {
-        // Enforce exactly one file
+      // ── Workflow-level input constraints ────────────────────────────────
+      if (
+        activeWorkflow === WorkflowType.COMPRESS ||
+        activeWorkflow === WorkflowType.SPLIT ||
+        activeWorkflow === WorkflowType.PROTECT
+      ) {
         if (files.length > 1 || documents.length > 0) {
           toast.error('This action accepts exactly one PDF document.');
           return;
         }
-        // Enforce PDF format
         const file = files[0];
         const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
         if (!isPdf) {
@@ -36,7 +47,6 @@ export function useFileUpload() {
           return;
         }
       } else if (activeWorkflow === WorkflowType.MERGE) {
-        // Enforce PDF format on all uploaded files
         for (const file of files) {
           const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
           if (!isPdf) {
@@ -45,7 +55,6 @@ export function useFileUpload() {
           }
         }
       } else if (activeWorkflow === WorkflowType.CONVERT) {
-        // Enforce exactly one document
         if (files.length > 1 || documents.length > 0) {
           toast.error('This action accepts exactly one document for conversion.');
           return;
@@ -55,25 +64,15 @@ export function useFileUpload() {
       setIsUploading(true);
 
       try {
-        // Get file paths
-        const filePaths = files.map((file) => (file as File & { path?: string }).path || file.name);
+        // Collect file paths — for native dialog files, path is the real FS path
+        // For drag-and-drop files, use .path if available (Electron adds it), else .name
+        const filePaths = files.map(
+          (file) => (file as File & { path?: string }).path || file.name
+        );
 
-        // Check total session size
-        const newFilesSize = files.reduce((sum, file) => sum + file.size, 0);
-        const currentSize = documents.reduce((sum, doc) => sum + doc.size, 0);
-        const totalSize = currentSize + newFilesSize;
-
-        if (totalSize > MAX_SESSION_SIZE_WARNING) {
-          const confirmed = window.confirm(
-            `Total file size (${formatFileSize(totalSize)}) exceeds ${formatFileSize(MAX_SESSION_SIZE_WARNING)}. This may affect performance. Continue?`
-          );
-          if (!confirmed) {
-            setIsUploading(false);
-            return;
-          }
-        }
-
-        // Call IPC to upload files
+        // ── IPC call ───────────────────────────────────────────────────────
+        // uploadFiles in main process copies files to temp dir and returns
+        // DocumentItem[] with REAL file sizes from stat().
         const result = await window.electron.uploadFiles(filePaths);
 
         if (result.success) {
@@ -85,27 +84,56 @@ export function useFileUpload() {
             return;
           }
 
-          // Add documents to store
+          // Check session size WARNING using real sizes returned from IPC
+          const uploadedSize = uploadedDocs.reduce((sum, doc) => sum + doc.size, 0);
+          const existingSize = documents.reduce((sum, doc) => sum + doc.size, 0);
+          const totalSize = existingSize + uploadedSize;
+
+          if (totalSize > MAX_SESSION_SIZE_WARNING) {
+            // Use native confirm dialog instead of window.confirm
+            const confirmed = await window.electron.showConfirmDialog(
+              `Total session size (${formatFileSize(totalSize)}) exceeds ${formatFileSize(
+                MAX_SESSION_SIZE_WARNING
+              )}. Processing large files may be slow. Continue?`,
+              'Large Session Warning'
+            );
+            if (!confirmed) {
+              // Clean up the just-uploaded docs since user cancelled
+              for (const doc of uploadedDocs) {
+                await window.electron.deleteFile(doc.id).catch(() => {});
+              }
+              setIsUploading(false);
+              return;
+            }
+          }
+
           addDocuments(uploadedDocs);
 
-          // Show success message
           const skippedCount = files.length - uploadedDocs.length;
           if (skippedCount > 0) {
             toast.error(`${skippedCount} file(s) were invalid and skipped`);
           }
-          toast.success(`${uploadedDocs.length} file(s) uploaded successfully`);
 
-          // 2. Navigate based on the active workflow
+          const label = uploadedDocs.length === 1 ? 'file' : 'files';
+          toast.success(
+            `${uploadedDocs.length} ${label} added (${formatFileSize(uploadedSize)})`
+          );
+
+          // ── Navigate to next screen based on workflow ─────────────────────
+          const firstDoc = uploadedDocs[0];
+          const fileBaseName = firstDoc.filename.substring(0, firstDoc.filename.lastIndexOf('.')) || firstDoc.filename;
+
           if (activeWorkflow === WorkflowType.COMPRESS) {
-            updateOutputOptions({ format: OutputFormat.PDF });
+            updateOutputOptions({ format: OutputFormat.PDF, compress: true, filename: `${fileBaseName}_compressed` });
             setView(AppView.OUTPUT_OPTIONS);
           } else if (activeWorkflow === WorkflowType.PROTECT) {
-            updateOutputOptions({ format: OutputFormat.PDF, protection: { enabled: true } });
+            updateOutputOptions({ format: OutputFormat.PDF, protection: { enabled: true }, filename: `${fileBaseName}_protected` });
             setView(AppView.OUTPUT_OPTIONS);
           } else if (activeWorkflow === WorkflowType.CONVERT) {
+            updateOutputOptions({ filename: `${fileBaseName}_converted` });
             setView(AppView.OUTPUT_OPTIONS);
           } else if (activeWorkflow === WorkflowType.SPLIT) {
-            updateOutputOptions({ format: OutputFormat.PDF });
+            updateOutputOptions({ format: OutputFormat.PDF, filename: `${fileBaseName}_split` });
             setView(AppView.OUTPUT_OPTIONS);
           } else {
             setView(AppView.DOCUMENT_LIST);
@@ -115,7 +143,7 @@ export function useFileUpload() {
         }
       } catch (error) {
         console.error('Upload error:', error);
-        toast.error('Failed to upload files');
+        toast.error('Failed to upload files. Please try again.');
       } finally {
         setIsUploading(false);
       }

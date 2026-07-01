@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, shell } from 'electron';
 import { IpcChannel } from '../../../src/types/IPC.types';
 import { PdfService } from '../services/pdf.service';
 import { FileService } from '../services/file.service';
@@ -7,58 +7,75 @@ const pdfService = new PdfService();
 const fileService = new FileService();
 
 /**
- * Register PDF-related IPC handlers
+ * Register PDF-related IPC handlers.
+ * Document ID → file path resolution happens HERE so pdf.service has no FileService dependency.
  */
 export function registerPdfHandlers(): void {
-  /**
-   * Merge PDFs
-   */
+  // ── Merge ────────────────────────────────────────────────────────────────
   ipcMain.handle(IpcChannel.PDF_MERGE, async (_, { documentIds, outputPath }) => {
-    // Get document paths from IDs
     const documentPaths: string[] = [];
-    
     for (const id of documentIds) {
       const doc = fileService.getDocument(id);
-      if (doc) {
-        documentPaths.push(doc.tempPath);
-      }
+      if (doc) documentPaths.push(doc.tempPath);
     }
-
     return await pdfService.merge(documentPaths, outputPath);
   });
 
-  /**
-   * Compress PDF
-   */
+  // ── Compress ─────────────────────────────────────────────────────────────
   ipcMain.handle(IpcChannel.PDF_COMPRESS, async (_, { documentId, targetSize }) => {
-    return await pdfService.compress(documentId, targetSize);
+    const doc = fileService.getDocument(documentId);
+    if (!doc || doc.type !== 'PDF') {
+      return {
+        success: false,
+        error: { code: 'FILE_NOT_FOUND', message: 'PDF not found', recoverable: false },
+      };
+    }
+    return await pdfService.compressFile(doc.tempPath, targetSize);
   });
 
-  /**
-   * Convert PDF
-   */
+  // ── Convert ──────────────────────────────────────────────────────────────
   ipcMain.handle(IpcChannel.PDF_CONVERT, async (_, { documentId, targetFormat }) => {
-    return await pdfService.convert(documentId, targetFormat);
+    const doc = fileService.getDocument(documentId);
+    if (!doc) {
+      return {
+        success: false,
+        error: { code: 'FILE_NOT_FOUND', message: 'Document not found', recoverable: false },
+      };
+    }
+    return await pdfService.convertFile(doc.tempPath, targetFormat);
   });
 
-  /**
-   * Split PDF
-   */
+  // ── Split ────────────────────────────────────────────────────────────────
   ipcMain.handle(IpcChannel.PDF_SPLIT, async (_, { documentId, splitPoints }) => {
-    return await pdfService.split(documentId, splitPoints);
+    const doc = fileService.getDocument(documentId);
+    if (!doc || doc.type !== 'PDF') {
+      return {
+        success: false,
+        error: { code: 'FILE_NOT_FOUND', message: 'PDF not found', recoverable: false },
+      };
+    }
+    return await pdfService.splitFile(doc.tempPath, splitPoints);
   });
 
-  /**
-   * Protect PDF with password
-   */
+  // ── Protect ──────────────────────────────────────────────────────────────
   ipcMain.handle(IpcChannel.PDF_PROTECT, async (_, { documentId, ownerPassword, userPassword }) => {
-    return await pdfService.protect(documentId, ownerPassword, userPassword);
+    const doc = fileService.getDocument(documentId);
+    if (!doc || doc.type !== 'PDF') {
+      return {
+        success: false,
+        error: { code: 'FILE_NOT_FOUND', message: 'PDF not found', recoverable: false },
+      };
+    }
+    return await pdfService.protectFile(doc.tempPath, ownerPassword, userPassword);
   });
 
+  // ── Preview ──────────────────────────────────────────────────────────────
   /**
-   * Preview PDF in a new native window
+   * Two-strategy PDF preview:
+   * 1. shell.openPath() → uses Windows default PDF viewer (Acrobat, Edge, etc.) — most reliable
+   * 2. Fallback: in-app BrowserWindow using docuflow:// protocol (Chromium PDF viewer)
    */
-  ipcMain.handle(IpcChannel.PDF_PREVIEW, async (_, documentId) => {
+  ipcMain.handle(IpcChannel.PDF_PREVIEW, async (_, documentId: string) => {
     try {
       const doc = fileService.getDocument(documentId);
       if (!doc) {
@@ -66,40 +83,64 @@ export function registerPdfHandlers(): void {
           success: false,
           error: {
             code: 'FILE_NOT_FOUND',
-            message: 'Document not found',
-            recoverable: false
-          }
+            message: 'Document not found in session',
+            recoverable: false,
+          },
         };
       }
 
-      // Create a native window to display PDF
+      // Strategy 1: system default PDF viewer
+      const openError = await shell.openPath(doc.tempPath);
+      if (!openError) {
+        return { success: true, data: undefined };
+      }
+
+      // Strategy 2: in-app window via docuflow:// protocol
+      console.warn(`shell.openPath failed (${openError}), falling back to in-app viewer`);
+      const normalizedPath = doc.tempPath.replace(/\\/g, '/');
+      const previewUrl = `docuflow:///${normalizedPath}`;
+
       const pdfWindow = new BrowserWindow({
-        title: `Preview: ${doc.filename}`,
+        title: `Preview — ${doc.filename}`,
         width: 1000,
         height: 800,
         autoHideMenuBar: true,
+        show: false,
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-        }
+          webSecurity: false, // Required so the iframe can load the docuflow:// URL
+        },
       });
 
-      const url = `file:///${doc.tempPath.replace(/\\/g, '/')}`;
-      await pdfWindow.loadURL(url);
+      pdfWindow.once('ready-to-show', () => pdfWindow.show());
 
-      return {
-        success: true,
-        data: undefined
-      };
+      const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PDF Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body, html { height: 100%; background: #525659; }
+  iframe { width: 100%; height: 100%; border: none; display: block; }
+</style>
+</head>
+<body>
+  <iframe src="${previewUrl}"></iframe>
+</body>
+</html>`;
+
+      await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      return { success: true, data: undefined };
     } catch (error) {
       return {
         success: false,
         error: {
           code: 'UNKNOWN_ERROR',
-          message: 'Failed to preview PDF',
-          detail: error instanceof Error ? error.message : 'Unknown error',
-          recoverable: true
-        }
+          message: error instanceof Error ? error.message : 'Failed to open PDF preview',
+          recoverable: true,
+        },
       };
     }
   });
