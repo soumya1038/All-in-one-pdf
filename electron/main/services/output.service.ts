@@ -94,17 +94,7 @@ export class OutputService {
 
       // Process based on format and options
       
-      // 1. Check for unsupported format conversions
-      if (options.format !== OutputFormat.PDF) {
-        return {
-          success: false,
-          error: {
-            code: ErrorCode.PDF_CONVERT_FAILED,
-            message: `Conversion to ${options.format} requires external dependencies (Ghostscript/ImageMagick) which are not installed.`,
-            recoverable: false,
-          },
-        };
-      }
+      // 1. Format conversion check (supported natively now)
 
       // 2.5 Process Split PDF if splitPoints are provided
       if (isSplit) {
@@ -198,6 +188,59 @@ export class OutputService {
           await unlink(finalTempPath).catch(() => {});
         }
         finalTempPath = protectResult.data;
+      }
+
+      // 4.8 Format Conversion
+      if (options.format !== OutputFormat.PDF) {
+        const convertResult = await this.pdfService.convertFile(
+          finalTempPath,
+          options.format,
+          options.imageDpi,
+          outputPath
+        );
+
+        // Clean up intermediate temp files
+        if (finalTempPath !== documents[0].tempPath) {
+          await unlink(finalTempPath).catch(() => {});
+        }
+
+        if (!convertResult.success) {
+          return convertResult as Result<ProcessingResult>;
+        }
+
+        const duration = Date.now() - startTime;
+        let outSize = 0;
+        try {
+          const stats = await stat(convertResult.data!);
+          outSize = stats.size;
+        } catch {}
+
+        this.lastOutputPath = convertResult.data!;
+
+        // Persist to recent files
+        try {
+          const recentEntry: RecentFile = {
+            filename: basename(convertResult.data!),
+            path: convertResult.data!,
+            timestamp: Date.now(),
+            operation: this.detectOperation(options),
+          };
+          const existing = store.get('recentFiles', []);
+          const filtered = existing.filter((f) => f.path !== convertResult.data!);
+          filtered.unshift(recentEntry);
+          store.set('recentFiles', filtered.slice(0, 50));
+        } catch (err) {
+          console.error('Failed to add recent file:', err);
+        }
+
+        return {
+          success: true,
+          data: {
+            outputPath: convertResult.data!,
+            outputSize: outSize,
+            duration,
+          },
+        };
       }
 
       // 5. Final Save — copy temp → user destination

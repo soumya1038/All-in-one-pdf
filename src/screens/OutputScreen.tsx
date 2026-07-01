@@ -419,14 +419,20 @@ function OutputScreen() {
               </div>
             )}
 
-            {/* Convert format warning */}
+            {/* Convert format info banner */}
             {showFormatSelector && format !== OutputFormat.PDF && (
-              <div className="p-4 bg-warning-light border border-warning rounded-md flex gap-3">
-                <span className="text-warning text-lg leading-none">⚠️</span>
+              <div className="p-4 bg-bg-sunken border border-border/80 rounded-md flex gap-3 animate-fade-in shadow-sm">
+                <span className="text-accent text-lg leading-none">ℹ️</span>
                 <div>
-                  <p className="text-sm font-semibold text-text-primary mb-1">Format conversion not yet supported</p>
+                  <p className="text-sm font-semibold text-text-primary mb-1">
+                    {format === OutputFormat.DOCX ? 'Word Document Export' : `${format} Image Export`}
+                  </p>
                   <p className="text-xs text-text-secondary">
-                    Exporting to {format} requires Ghostscript or LibreOffice to be installed. This operation will fail. Only PDF output is fully supported in this version.
+                    {format === OutputFormat.DOCX ? (
+                      'For layout and image preservation, make sure pdf2docx is installed (pip install pdf2docx). Otherwise, a native text-extraction fallback is used.'
+                    ) : (
+                      `Multi-page documents will be exported as individual ${format} files in your selected destination folder.`
+                    )}
                   </p>
                 </div>
               </div>

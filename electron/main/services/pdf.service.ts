@@ -4,6 +4,9 @@ import { spawn } from 'child_process';
 import { PDFDocument } from 'pdf-lib';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
 import { getTempFilePath } from '../utils/tempDir';
+import { createCanvas } from 'canvas';
+import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
+import sharp from 'sharp';
 
 /**
  * Service for PDF operations.
@@ -258,17 +261,232 @@ if __name__ == '__main__':
 
   /**
    * Convert PDF to another format.
-   * NOTE: Requires Ghostscript or LibreOffice (not bundled).
+   * Supports: JPEG, PNG, TIFF, and DOCX.
    */
-  async convertFile(_filePath: string, targetFormat: string): Promise<Result<string>> {
-    return {
-      success: false,
-      error: {
-        code: ErrorCode.PDF_CONVERT_FAILED,
-        message: `Conversion to ${targetFormat} is not supported in this version. PDF-to-image or PDF-to-Word conversion requires Ghostscript or LibreOffice to be installed separately.`,
-        recoverable: false,
-      },
-    };
+  async convertFile(
+    filePath: string,
+    targetFormat: string,
+    imageDpi: number = 150,
+    outputPath?: string
+  ): Promise<Result<string>> {
+    const formatUpper = targetFormat.toUpperCase();
+    const finalOutputPath = outputPath || getTempFilePath(`converted_${Date.now()}.${formatUpper.toLowerCase()}`);
+
+    try {
+      if (['JPEG', 'PNG', 'TIFF'].includes(formatUpper)) {
+        return await this.convertPdfToImages(filePath, formatUpper as 'JPEG' | 'PNG' | 'TIFF', imageDpi, finalOutputPath);
+      } else if (formatUpper === 'DOCX') {
+        return await this.convertPdfToDocx(filePath, finalOutputPath);
+      } else {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.PDF_CONVERT_FAILED,
+            message: `Unsupported target format: ${targetFormat}`,
+            recoverable: false,
+          },
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.PDF_CONVERT_FAILED,
+          message: error instanceof Error ? error.message : 'Unknown conversion error',
+          recoverable: true,
+        },
+      };
+    }
+  }
+
+  /**
+   * Render PDF pages as JPEG/PNG/TIFF images using Node Canvas + Sharp
+   */
+  private async convertPdfToImages(
+    filePath: string,
+    targetFormat: 'JPEG' | 'PNG' | 'TIFF',
+    dpi: number,
+    outputPath: string
+  ): Promise<Result<string>> {
+    try {
+      const pdfBuffer = await readFile(filePath);
+      const data = new Uint8Array(pdfBuffer);
+
+      const loadingTask = pdfjs.getDocument({ data });
+      const pdf = await loadingTask.promise;
+      const totalPages = pdf.numPages;
+
+      const scale = dpi / 72.0;
+      const baseDir = dirname(outputPath);
+      const ext = extname(outputPath);
+      const baseName = basename(outputPath, ext);
+
+      let firstPagePath = '';
+
+      for (let p = 1; p <= totalPages; p++) {
+        const page = await pdf.getPage(p);
+        const viewport = page.getViewport({ scale });
+
+        const canvas = createCanvas(viewport.width, viewport.height);
+        const context = canvas.getContext('2d');
+
+        const renderContext = {
+          canvasContext: context as any,
+          viewport: viewport,
+        };
+
+        await page.render(renderContext).promise;
+
+        let finalPath = '';
+        if (totalPages === 1) {
+          finalPath = outputPath;
+        } else {
+          finalPath = join(baseDir, `${baseName}_page_${p}${ext}`);
+        }
+
+        if (p === 1) {
+          firstPagePath = finalPath;
+        }
+
+        let buffer: Buffer;
+        if (targetFormat === 'JPEG') {
+          buffer = canvas.toBuffer('image/jpeg', { quality: 0.9 });
+        } else if (targetFormat === 'PNG') {
+          buffer = canvas.toBuffer('image/png');
+        } else { // TIFF
+          const pngBuffer = canvas.toBuffer('image/png');
+          buffer = await sharp(pngBuffer).tiff().toBuffer();
+        }
+
+        await writeFile(finalPath, buffer);
+      }
+
+      return { success: true, data: firstPagePath };
+    } catch (err) {
+      console.error('PDF image conversion failed:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Convert PDF to DOCX using Python pdf2docx or fallback text docx generator
+   */
+  private async convertPdfToDocx(filePath: string, outputPath: string): Promise<Result<string>> {
+    const scriptPath = getTempFilePath('_convert_docx_script.py');
+
+    const pyScript = `
+import sys
+import os
+import zipfile
+
+# Try to use pdf2docx for layout preservation
+try:
+    from pdf2docx import Converter
+    use_pdf2docx = True
+except ImportError:
+    use_pdf2docx = False
+
+pdf_path = sys.argv[1]
+docx_path = sys.argv[2]
+
+if use_pdf2docx:
+    try:
+        cv = Converter(pdf_path)
+        cv.convert(docx_path)
+        cv.close()
+        print("CONVERT_OK")
+        sys.exit(0)
+    except Exception as e:
+        sys.stderr.write("pdf2docx failed: " + str(e) + "\\nFalling back to text extraction...\\n")
+
+# Fallback method: Extract text with pypdf and build a simple DOCX file
+try:
+    import pypdf
+    reader = pypdf.PdfReader(pdf_path)
+    paragraphs = []
+    for page in reader.pages:
+        text = page.extract_text()
+        if text:
+            paragraphs.extend(text.split('\\n'))
+            
+    # Escape XML characters
+    def escape_xml(s):
+        return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:contentTypes="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    doc_body = ""
+    for p_text in paragraphs:
+        p_text = p_text.strip()
+        if p_text:
+            doc_body += f"<w:p><w:r><w:t>{escape_xml(p_text)}</w:t></w:r></w:p>"
+
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    {doc_body}
+  </w:body>
+</w:document>"""
+
+    with zipfile.ZipFile(docx_path, 'w', zipfile.ZIP_DEFLATED) as docx:
+        docx.writestr('[Content_Types].xml', content_types)
+        docx.writestr('_rels/.rels', rels)
+        docx.writestr('word/document.xml', document_xml)
+        
+    print("CONVERT_FALLBACK_OK")
+except Exception as e:
+    sys.stderr.write("Fallback failed: " + str(e) + "\\n")
+    sys.exit(1)
+`;
+
+    try {
+      await writeFile(scriptPath, pyScript, 'utf-8');
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('python', [
+          scriptPath,
+          filePath,
+          outputPath,
+        ]);
+
+        let stderr = '';
+        proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString(); });
+        proc.on('close', (code: number) => {
+          if (code === 0) resolve();
+          else reject(new Error(stderr || `Python exited with code ${code}`));
+        });
+        proc.on('error', (err: Error) => reject(err));
+      });
+
+      await unlink(scriptPath).catch(() => {});
+      return { success: true, data: outputPath };
+    } catch (error) {
+      await unlink(scriptPath).catch(() => {});
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      const isPythonMissing = errMsg.includes('ENOENT') || errMsg.includes('not found');
+
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.PDF_CONVERT_FAILED,
+          message: isPythonMissing
+            ? 'Python is not installed or not in PATH. Please install Python 3.'
+            : 'Failed to convert PDF to Word. Ensure Python 3 is installed.',
+          detail: errMsg,
+          recoverable: true,
+        },
+      };
+    }
   }
 
   /**
