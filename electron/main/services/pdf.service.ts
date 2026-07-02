@@ -7,6 +7,7 @@ import { getTempFilePath } from '../utils/tempDir';
 import { createCanvas } from 'canvas';
 import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
 import sharp from 'sharp';
+sharp.cache(false);
 
 /**
  * Service for PDF operations.
@@ -37,11 +38,22 @@ export class PdfService {
         try {
           const fileBytes = await readFile(pdfPath);
           const ext = pdfPath.toLowerCase();
+          const isImage = ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') ||
+                          ext.endsWith('.webp') || ext.endsWith('.bmp') || ext.endsWith('.tiff') || ext.endsWith('.tif');
 
-          if (ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg')) {
-            const image = ext.endsWith('.png')
-              ? await mergedPdf.embedPng(fileBytes)
-              : await mergedPdf.embedJpg(fileBytes);
+          if (isImage) {
+            let imageBuffer: Uint8Array = new Uint8Array(fileBytes);
+            let isPng = ext.endsWith('.png');
+
+            if (ext.endsWith('.webp') || ext.endsWith('.bmp') || ext.endsWith('.tiff') || ext.endsWith('.tif')) {
+              const pngBuffer = await sharp(fileBytes).png().toBuffer();
+              imageBuffer = new Uint8Array(pngBuffer);
+              isPng = true;
+            }
+
+            const image = isPng
+              ? await mergedPdf.embedPng(imageBuffer)
+              : await mergedPdf.embedJpg(imageBuffer);
 
             const { width, height } = image.scale(1);
             const page = mergedPdf.addPage([width, height]);

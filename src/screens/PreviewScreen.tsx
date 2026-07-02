@@ -406,8 +406,8 @@ function PreviewScreen() {
   // Draw real-time magnifying loupe zoom
   const drawLoupe = (pctX: number, pctY: number) => {
     const loupeCanvas = loupeCanvasRef.current;
-    const img = originalImageRef.current;
-    if (!loupeCanvas || !img) return;
+    const canvas = canvasRef.current;
+    if (!loupeCanvas || !canvas) return;
 
     const ctx = loupeCanvas.getContext('2d');
     if (!ctx) return;
@@ -415,16 +415,16 @@ function PreviewScreen() {
     // Clear loupe (now 180x180)
     ctx.clearRect(0, 0, 180, 180);
 
-    // Map handle percentages to image coordinates
-    const px = (pctX / 100) * img.width;
-    const py = (pctY / 100) * img.height;
+    // Map handle percentages to canvas coordinates
+    const px = (pctX / 100) * canvas.width;
+    const py = (pctY / 100) * canvas.height;
 
     // Zoom parameters: crop a 400x400 square around handle and draw to 180x180 loupe (2x less zoom)
     const srcSize = 400;
     const destSize = 180;
 
     ctx.drawImage(
-      img,
+      canvas,
       px - srcSize / 2,
       py - srcSize / 2,
       srcSize,
@@ -717,7 +717,15 @@ function PreviewScreen() {
     setIsProcessing(true);
     try {
       // 1. Get base64 of the clean canvas (no signatures drawn yet)
-      const cleanBase64Data = canvas.toDataURL('image/jpeg', 0.95);
+      const cleanCanvas = document.createElement('canvas');
+      cleanCanvas.width = canvas.width;
+      cleanCanvas.height = canvas.height;
+      const cleanCtx = cleanCanvas.getContext('2d');
+      if (!cleanCtx) throw new Error('Could not get 2D context for clean canvas');
+      cleanCtx.fillStyle = '#ffffff';
+      cleanCtx.fillRect(0, 0, cleanCanvas.width, cleanCanvas.height);
+      cleanCtx.drawImage(canvas, 0, 0);
+      const cleanBase64Data = cleanCanvas.toDataURL('image/jpeg', 0.95);
 
       // 2. Create a temporary canvas to draw the flattened version with signatures
       const flatCanvas = document.createElement('canvas');
@@ -726,7 +734,9 @@ function PreviewScreen() {
       const flatCtx = flatCanvas.getContext('2d');
       if (!flatCtx) throw new Error('Could not get 2D context for flattening');
 
-      // Draw clean canvas contents
+      // Draw clean canvas contents on solid white background
+      flatCtx.fillStyle = '#ffffff';
+      flatCtx.fillRect(0, 0, flatCanvas.width, flatCanvas.height);
       flatCtx.drawImage(canvas, 0, 0);
 
       // Draw all signatures in correct position

@@ -93,7 +93,7 @@ function DocumentCard({
 
         {/* Page Count Badge */}
         {document.pageCount > 1 && (
-          <div className="absolute top-2 right-2 px-2 py-1 bg-black/70 text-white text-xs font-mono rounded">
+          <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/70 text-white text-xs font-mono rounded">
             {document.pageCount} pages
           </div>
         )}

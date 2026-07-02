@@ -71,6 +71,9 @@ const api: IpcApi = {
   addRecentFile: (file) =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_ADD_RECENT, file),
 
+  removeRecentFile: (filePath) =>
+    ipcRenderer.invoke(IpcChannel.SYSTEM_REMOVE_RECENT, filePath),
+
   clearTemp: () =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_CLEAR_TEMP),
 

@@ -63,6 +63,30 @@ export function registerSystemHandlers(): void {
   });
 
   /**
+   * Remove a recent file entry from persistent storage
+   */
+  ipcMain.handle(IpcChannel.SYSTEM_REMOVE_RECENT, async (_, filePath: string) => {
+    try {
+      const existing = store.get('recentFiles', []);
+      const updated = existing.filter((f) => f.path !== filePath);
+      store.set('recentFiles', updated);
+      const result: Result<void> = { success: true, data: undefined };
+      return result;
+    } catch (error) {
+      const result: Result<void> = {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to remove recent file',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+      return result;
+    }
+  });
+
+  /**
    * Clear temp directory
    */
   ipcMain.handle(IpcChannel.SYSTEM_CLEAR_TEMP, async () => {

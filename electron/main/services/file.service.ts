@@ -2,6 +2,7 @@ import { copyFile, unlink, writeFile, stat, readFile } from 'fs/promises';
 import { basename } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from 'sharp';
+sharp.cache(false);
 import { Result, ErrorCode } from '../../../src/types/Error.types';
 import { DocumentItem, DocumentType, PlacedSignature } from '../../../src/types/Document.types';
 import { getTempFilePath } from '../utils/tempDir';

@@ -6,6 +6,7 @@ import { Result, ErrorCode } from '../../../src/types/Error.types';
 import { ScannerDevice, ScanSettings, ScanResult, ScanColorMode } from '../../../src/types/Scanner.types';
 import { getTempFilePath } from '../utils/tempDir';
 import sharp from 'sharp';
+sharp.cache(false);
 
 const execAsync = promisify(exec);
 
@@ -89,6 +90,8 @@ export class ScannerService {
     try {
       const tempId = uuidv4();
       const imagePath = getTempFilePath(`scan_${tempId}.jpg`);
+      const escapedImagePath = imagePath.replace(/'/g, "''");
+      const escapedDeviceId = deviceId.replace(/'/g, "''");
 
       // 1 = Color, 2 = Grayscale, 4 = Black & White
       let intent = 1;
@@ -100,7 +103,7 @@ export class ScannerService {
         $wia = New-Object -ComObject WIA.DeviceManager
         $deviceInfo = $null
         foreach ($info in $wia.DeviceInfos) {
-            if ($info.DeviceID -eq '${deviceId}') {
+            if ($info.DeviceID -eq '${escapedDeviceId}') {
                 $deviceInfo = $info
                 break
             }
@@ -124,7 +127,7 @@ export class ScannerService {
         $imageProcess.Filters.Item(1).Properties.Item('Quality').Value = 90
         $image = $imageProcess.Apply($image)
         
-        $image.SaveFile('${imagePath}')
+        $image.SaveFile('${escapedImagePath}')
       `;
 
       const encodedCommand = Buffer.from(script, 'utf16le').toString('base64');

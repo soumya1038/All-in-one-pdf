@@ -71,7 +71,8 @@ function HomeScreen() {
     // Try to open the file
     const result = await window.electron.openFile(filePath);
     if (!result.success) {
-      // If file doesn't exist, remove from recent files
+      // If file doesn't exist, remove from recent files persistently
+      await window.electron.removeRecentFile(filePath).catch(() => {});
       const updatedRecent = recentFiles.filter((f) => f.path !== filePath);
       setRecentFiles(updatedRecent);
     }

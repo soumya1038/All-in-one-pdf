@@ -39,6 +39,7 @@ export enum IpcChannel {
   // System operations
   SYSTEM_GET_RECENT = 'docuflow:system:getRecent',
   SYSTEM_ADD_RECENT = 'docuflow:system:addRecent',
+  SYSTEM_REMOVE_RECENT = 'docuflow:system:removeRecent',
   SYSTEM_CLEAR_TEMP = 'docuflow:system:clearTemp',
   SYSTEM_OPEN_FILE = 'docuflow:system:openFile',
   SYSTEM_OPEN_FOLDER = 'docuflow:system:openFolder',
@@ -190,6 +191,7 @@ export interface IpcApi {
   // System operations
   getRecentFiles: () => Promise<Result<RecentFile[]>>;
   addRecentFile: (file: RecentFile) => Promise<Result<void>>;
+  removeRecentFile: (filePath: string) => Promise<Result<void>>;
   clearTemp: () => Promise<Result<void>>;
   openFile: (filePath: string) => Promise<Result<void>>;
   openFolder: (filePath: string) => Promise<Result<void>>;
