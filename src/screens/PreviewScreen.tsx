@@ -797,7 +797,7 @@ function PreviewScreen() {
   };
 
   const handleCancelSession = async () => {
-    const confirmed = await window.electron.showConfirmDialog(
+    const confirmed = await useAppStore.getState().showConfirm(
       'Are you sure you want to cancel this session? All uploaded files will be discarded.',
       'Cancel Session'
     );

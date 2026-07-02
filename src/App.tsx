@@ -11,6 +11,7 @@ import PreviewScreen from './screens/PreviewScreen';
 import ScannerModal from './components/scanner/ScannerModal';
 import DocumentPreviewModal from './components/document/DocumentPreviewModal';
 import AddMoreModal from './components/document/AddMoreModal';
+import InAppConfirmModal from './components/ui/InAppConfirmModal';
 
 function App() {
   const currentView = useAppStore((state) => state.ui.currentView);
@@ -40,6 +41,7 @@ function App() {
       <ScannerModal />
       <DocumentPreviewModal />
       <AddMoreModal />
+      <InAppConfirmModal />
       <Toaster
         position="top-right"
         toastOptions={{

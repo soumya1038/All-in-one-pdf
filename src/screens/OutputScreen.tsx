@@ -47,8 +47,15 @@ function OutputScreen() {
   const pageCount = documents[0]?.pageCount || 1;
 
   // Preview panel states
+  interface PreviewPageItem {
+    docId: string;
+    docFilename: string;
+    pageNumber: number;
+    tempPath: string;
+  }
+
   const [activeDocIndex, setActiveDocIndex] = useState(0);
-  const [pageImages, setPageImages] = useState<Record<number, string>>({});
+  const [allPreviewPages, setAllPreviewPages] = useState<PreviewPageItem[]>([]);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
@@ -58,24 +65,46 @@ function OutputScreen() {
   useEffect(() => {
     let active = true;
     const loadAllPages = async () => {
-      if (!activeDoc) return;
       setIsLoadingPreview(true);
       try {
-        const images: Record<number, string> = {};
-        for (let p = 1; p <= activeDoc.pageCount; p++) {
-          if (activeDoc.cleanTempPaths?.[p]) {
-            images[p] = activeDoc.cleanTempPaths[p];
-          } else if (activeDoc.type === DocumentType.PDF) {
-            const res = await window.electron.renderPdfPage(activeDoc.id, p);
-            if (res.success && res.data) {
-              images[p] = res.data;
+        const pages: PreviewPageItem[] = [];
+
+        if (format === OutputFormat.PDF) {
+          // Concatenate all pages of all documents
+          for (const doc of documents) {
+            for (let p = 1; p <= doc.pageCount; p++) {
+              if (doc.cleanTempPaths?.[p]) {
+                pages.push({ docId: doc.id, docFilename: doc.filename, pageNumber: p, tempPath: doc.cleanTempPaths[p] });
+              } else if (doc.type === DocumentType.PDF) {
+                const res = await window.electron.renderPdfPage(doc.id, p);
+                if (res.success && res.data) {
+                  pages.push({ docId: doc.id, docFilename: doc.filename, pageNumber: p, tempPath: res.data });
+                }
+              } else {
+                pages.push({ docId: doc.id, docFilename: doc.filename, pageNumber: p, tempPath: doc.tempPath });
+              }
             }
-          } else {
-            images[p] = activeDoc.tempPath;
+          }
+        } else {
+          // Display only pages of the selected document
+          if (activeDoc) {
+            for (let p = 1; p <= activeDoc.pageCount; p++) {
+              if (activeDoc.cleanTempPaths?.[p]) {
+                pages.push({ docId: activeDoc.id, docFilename: activeDoc.filename, pageNumber: p, tempPath: activeDoc.cleanTempPaths[p] });
+              } else if (activeDoc.type === DocumentType.PDF) {
+                const res = await window.electron.renderPdfPage(activeDoc.id, p);
+                if (res.success && res.data) {
+                  pages.push({ docId: activeDoc.id, docFilename: activeDoc.filename, pageNumber: p, tempPath: res.data });
+                }
+              } else {
+                pages.push({ docId: activeDoc.id, docFilename: activeDoc.filename, pageNumber: p, tempPath: activeDoc.tempPath });
+              }
+            }
           }
         }
+
         if (active) {
-          setPageImages(images);
+          setAllPreviewPages(pages);
         }
       } catch (err) {
         console.error(err);
@@ -87,7 +116,7 @@ function OutputScreen() {
     return () => {
       active = false;
     };
-  }, [activeDocIndex, activeDoc]);
+  }, [activeDocIndex, activeDoc, format, documents]);
 
   // Keyboard navigation for vertical scroll preview
   useEffect(() => {
@@ -132,7 +161,7 @@ function OutputScreen() {
   };
 
   const handleCancelSession = async () => {
-    const confirmed = await window.electron.showConfirmDialog(
+    const confirmed = await useAppStore.getState().showConfirm(
       'Are you sure you want to cancel this session? All uploaded files will be discarded.',
       'Cancel Session'
     );
@@ -211,7 +240,7 @@ function OutputScreen() {
   const { title: headerTitle, desc: headerDesc } = getHeaderContent();
 
   const PreviewPanel = () => {
-    if (!activeDoc) {
+    if (!activeDoc && allPreviewPages.length === 0) {
       return (
         <div className="flex-grow flex items-center justify-center text-xs text-text-muted italic select-none">
           No document loaded
@@ -220,9 +249,9 @@ function OutputScreen() {
     }
 
     return (
-      <div className="flex-1 flex flex-col overflow-hidden h-full">
-        {/* Document Selector Header if multiple files */}
-        {documents.length > 1 && (
+      <div className="flex-grow flex flex-col overflow-hidden h-full">
+        {/* Document Selector Header if multiple files and output format is NOT PDF */}
+        {documents.length > 1 && format !== OutputFormat.PDF && (
           <div className="p-3 bg-bg-surface border-b border-border flex items-center gap-2 flex-shrink-0 select-none">
             <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">Document:</span>
             <select
@@ -230,7 +259,7 @@ function OutputScreen() {
               onChange={(e) => {
                 setActiveDocIndex(parseInt(e.target.value));
               }}
-              className="flex-1 px-2.5 py-1 text-xs bg-bg-sunken border border-border rounded focus:outline-none font-medium cursor-pointer"
+              className="flex-1 px-2.5 py-1 text-xs bg-bg-sunken border border-border rounded focus:outline-none font-medium cursor-pointer text-text-primary"
             >
               {documents.map((d, index) => (
                 <option key={d.id} value={index}>
@@ -249,31 +278,35 @@ function OutputScreen() {
           {isLoadingPreview ? (
             <div className="absolute inset-0 bg-black/5 flex flex-col items-center justify-center gap-2 z-10">
               <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-              <span className="text-xs text-text-secondary font-medium">Loading Document Pages...</span>
+              <span className="text-xs text-text-secondary font-medium">Loading Page Previews...</span>
             </div>
           ) : null}
 
-          {Array.from({ length: activeDoc.pageCount }, (_, idx) => {
-            const pNum = idx + 1;
-            const path = pageImages[pNum];
+          {allPreviewPages.map((page) => {
+            const pageDoc = documents.find((d) => d.id === page.docId);
+            const totalPages = pageDoc?.pageCount || 1;
             return (
               <div
-                key={pNum}
+                key={`${page.docId}_${page.pageNumber}`}
                 className="flex-shrink-0 w-[240px] lg:w-[280px] xl:w-[320px] snap-center flex flex-col items-center gap-3 select-none"
               >
                 <div className="relative aspect-[3/4] w-full shadow-lg rounded-lg border border-border/60 bg-white overflow-hidden flex items-center justify-center p-2 hover:border-accent/40 transition-colors">
-                  {path ? (
+                  {page.tempPath ? (
                     <img
-                      src={`docuflow:///${path.replace(/\\/g, '/')}?t=${Date.now()}`}
-                      alt={`Page ${pNum}`}
+                      src={`docuflow:///${page.tempPath.replace(/\\/g, '/')}?t=${Date.now()}`}
+                      alt={`Page ${page.pageNumber}`}
                       className="max-w-full max-h-full object-contain rounded"
                     />
                   ) : (
                     <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
                   )}
                 </div>
-                <span className="text-xs font-semibold text-text-secondary font-mono bg-bg-surface px-2.5 py-1 rounded-full border border-border shadow-sm">
-                  Page {pNum} of {activeDoc.pageCount}
+                <span
+                  className="text-xs font-semibold text-text-secondary font-mono bg-bg-surface px-2.5 py-1 rounded-full border border-border shadow-sm text-center max-w-full truncate"
+                  title={page.docFilename}
+                >
+                  Page {page.pageNumber} of {totalPages}
+                  {documents.length > 1 && format === OutputFormat.PDF && ` (${page.docFilename})`}
                 </span>
               </div>
             );

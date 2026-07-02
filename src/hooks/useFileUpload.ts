@@ -90,8 +90,8 @@ export function useFileUpload() {
           const totalSize = existingSize + uploadedSize;
 
           if (totalSize > MAX_SESSION_SIZE_WARNING) {
-            // Use native confirm dialog instead of window.confirm
-            const confirmed = await window.electron.showConfirmDialog(
+            // Use in-app confirm dialog instead of native dialog
+            const confirmed = await useAppStore.getState().showConfirm(
               `Total session size (${formatFileSize(totalSize)}) exceeds ${formatFileSize(
                 MAX_SESSION_SIZE_WARNING
               )}. Processing large files may be slow. Continue?`,

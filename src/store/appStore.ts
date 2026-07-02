@@ -46,6 +46,16 @@ interface AppState {
   sessionSignatures: string[];
   addSessionSignature: (signature: string) => void;
   clearSessionSignatures: () => void;
+  confirmDialog: {
+    isOpen: boolean;
+    message: string;
+    title: string;
+    confirmText: string;
+    cancelText: string;
+    resolve: ((value: boolean) => void) | null;
+  };
+  showConfirm: (message: string, title?: string, confirmText?: string, cancelText?: string) => Promise<boolean>;
+  closeConfirm: (result: boolean) => void;
 }
 
 /**
@@ -216,4 +226,46 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       ui: { ...state.ui, previewBackView: view },
     })),
+
+  confirmDialog: {
+    isOpen: false,
+    message: '',
+    title: '',
+    confirmText: 'Confirm',
+    cancelText: 'Cancel',
+    resolve: null,
+  },
+
+  showConfirm: (message, title = 'Confirm', confirmText = 'Confirm', cancelText = 'Cancel') => {
+    return new Promise((resolve) => {
+      set({
+        confirmDialog: {
+          isOpen: true,
+          message,
+          title,
+          confirmText,
+          cancelText,
+          resolve,
+        },
+      });
+    });
+  },
+
+  closeConfirm: (result) => {
+    set((state) => {
+      if (state.confirmDialog.resolve) {
+        state.confirmDialog.resolve(result);
+      }
+      return {
+        confirmDialog: {
+          isOpen: false,
+          message: '',
+          title: '',
+          confirmText: 'Confirm',
+          cancelText: 'Cancel',
+          resolve: null,
+        },
+      };
+    });
+  },
 }));
