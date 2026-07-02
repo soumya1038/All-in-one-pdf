@@ -1,4 +1,4 @@
-import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2 } from 'lucide-react';
+import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../../store/appStore';
 import { ModalType, AppView, WorkflowType } from '../../types/UI.types';
@@ -48,6 +48,22 @@ function Sidebar() {
 
     // Documents already loaded — validate and proceed
     switch (workflow) {
+      case WorkflowType.COMPRESS_IMAGE:
+        if (documents.length !== 1 || documents[0].type === 'PDF') {
+          toast.error('Compress Image requires exactly one image. Remove others/PDFs first.');
+          return;
+        }
+        setActiveWorkflow(workflow);
+        const imgBase = documents[0].filename.substring(0, documents[0].filename.lastIndexOf('.')) || documents[0].filename;
+        const imgExt = documents[0].filename.toLowerCase();
+        let defaultFormat = OutputFormat.JPEG;
+        if (imgExt.endsWith('.png')) defaultFormat = OutputFormat.PNG;
+        else if (imgExt.endsWith('.tiff') || imgExt.endsWith('.tif')) defaultFormat = OutputFormat.TIFF;
+
+        updateOutputOptions({ format: defaultFormat, compress: true, filename: `${imgBase}_compressed` });
+        setView(AppView.OUTPUT_OPTIONS);
+        break;
+
       case WorkflowType.COMPRESS:
         if (documents.length !== 1 || documents[0].type !== 'PDF') {
           toast.error('Compress requires exactly one PDF document. Clear others first.');
@@ -110,6 +126,11 @@ function Sidebar() {
       icon: <Minimize size={20} />,
       label: 'Compress PDF',
       action: () => handleWorkflowClick(WorkflowType.COMPRESS),
+    },
+    {
+      icon: <FileImage size={20} />,
+      label: 'Compress Image',
+      action: () => handleWorkflowClick(WorkflowType.COMPRESS_IMAGE),
     },
     {
       icon: <Merge size={20} />,

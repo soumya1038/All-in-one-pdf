@@ -49,6 +49,7 @@ export interface OutputOptions {
   protection: PdfProtection;
   mergeAsSingle: boolean;       // Merge multiple files into one PDF
   splitPoints?: number[];       // Split points (page indices) for splitting
+  workflow?: string;            // Active workflow type name
 }
 
 /**

@@ -24,11 +24,17 @@ function OutputScreen() {
     if (activeWorkflow === WorkflowType.CONVERT) {
       return OutputFormat.JPEG; // Default export format for conversion
     }
+    if (activeWorkflow === WorkflowType.COMPRESS_IMAGE && documents[0]) {
+      const ext = documents[0].filename.toLowerCase();
+      if (ext.endsWith('.png')) return OutputFormat.PNG;
+      if (ext.endsWith('.tiff') || ext.endsWith('.tif')) return OutputFormat.TIFF;
+      return OutputFormat.JPEG;
+    }
     return OutputFormat.PDF;
   });
   const totalOriginalSize = documents.reduce((sum, d) => sum + d.size, 0);
   const [compressionOption, setCompressionOption] = useState<string>(() => {
-    if (activeWorkflow === WorkflowType.COMPRESS) {
+    if (activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
       return outputOptions.compressionLevel || 'medium';
     }
     return outputOptions.compress ? (outputOptions.compressionLevel || 'medium') : 'none';
@@ -203,7 +209,7 @@ function OutputScreen() {
     updateOutputOptions({
       filename,
       format,
-      compress: activeWorkflow === WorkflowType.COMPRESS || isCompressEnabled,
+      compress: activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE || isCompressEnabled,
       compressionLevel,
       pdfPageSize: pageSize,
       imageDpi: dpi,
@@ -214,6 +220,7 @@ function OutputScreen() {
         userPassword: protectionEnabled ? userPassword : undefined,
       },
       splitPoints,
+      workflow: activeWorkflow,
     });
 
     // Navigate to processing
@@ -224,6 +231,8 @@ function OutputScreen() {
     switch (activeWorkflow) {
       case WorkflowType.COMPRESS:
         return { title: 'Compress PDF Settings', desc: 'Configure size compression parameters' };
+      case WorkflowType.COMPRESS_IMAGE:
+        return { title: 'Compress Image Settings', desc: 'Configure size compression parameters' };
       case WorkflowType.MERGE:
         return { title: 'Merge PDF Settings', desc: 'Configure output properties for merged document' };
       case WorkflowType.CONVERT:
@@ -316,10 +325,10 @@ function OutputScreen() {
     );
   };
 
-  const showFormatSelector = activeWorkflow === WorkflowType.NONE || activeWorkflow === WorkflowType.CONVERT;
-  const showTargetSize = activeWorkflow === WorkflowType.COMPRESS || (activeWorkflow === WorkflowType.NONE && format === OutputFormat.PDF);
-  const showPageSize = format === OutputFormat.PDF && activeWorkflow !== WorkflowType.SPLIT && activeWorkflow !== WorkflowType.COMPRESS;
-  const showDpi = [OutputFormat.JPEG, OutputFormat.PNG, OutputFormat.TIFF].includes(format);
+  const showFormatSelector = activeWorkflow === WorkflowType.NONE || activeWorkflow === WorkflowType.CONVERT || activeWorkflow === WorkflowType.COMPRESS_IMAGE;
+  const showTargetSize = activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE || (activeWorkflow === WorkflowType.NONE && format === OutputFormat.PDF);
+  const showPageSize = format === OutputFormat.PDF && activeWorkflow !== WorkflowType.SPLIT && activeWorkflow !== WorkflowType.COMPRESS && activeWorkflow !== WorkflowType.COMPRESS_IMAGE;
+  const showDpi = [OutputFormat.JPEG, OutputFormat.PNG, OutputFormat.TIFF].includes(format) && activeWorkflow !== WorkflowType.COMPRESS_IMAGE;
   const showMergeOption = activeWorkflow === WorkflowType.NONE && documents.length > 1 && format === OutputFormat.PDF;
   const showProtectionSetting = activeWorkflow === WorkflowType.NONE && format === OutputFormat.PDF;
 
@@ -475,14 +484,14 @@ function OutputScreen() {
             {showTargetSize && (
               <div>
                 <label className="block text-sm font-medium text-text-primary mb-1">
-                  Compression Level {activeWorkflow === WorkflowType.COMPRESS ? '(Required)' : '(Optional)'}
+                  Compression Level {(activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE) ? '(Required)' : '(Optional)'}
                 </label>
                 <select
                   value={compressionOption}
                   onChange={(e) => setCompressionOption(e.target.value)}
                   className="w-full px-3 py-2 bg-bg-surface border border-border rounded-sm focus:outline-none focus:ring-2 focus:ring-border-focus text-base"
                 >
-                  {activeWorkflow !== WorkflowType.COMPRESS && (
+                  {activeWorkflow !== WorkflowType.COMPRESS && activeWorkflow !== WorkflowType.COMPRESS_IMAGE && (
                     <option value="none">None — Keep original size</option>
                   )}
                   <option value="low">Low (~{formatFileSize(totalOriginalSize * 0.8)}) — Best quality</option>

@@ -46,6 +46,19 @@ export function useFileUpload() {
           toast.error('Only PDF documents are accepted for this action.');
           return;
         }
+      } else if (activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
+        if (files.length > 1 || documents.length > 0) {
+          toast.error('This action accepts exactly one image.');
+          return;
+        }
+        const file = files[0];
+        const ext = file.name.toLowerCase();
+        const isImage = ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.png') ||
+                        ext.endsWith('.webp') || ext.endsWith('.bmp') || ext.endsWith('.tiff') || ext.endsWith('.tif');
+        if (!isImage) {
+          toast.error('Only image files are accepted for this action.');
+          return;
+        }
       } else if (activeWorkflow === WorkflowType.MERGE) {
         for (const file of files) {
           const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
@@ -125,6 +138,14 @@ export function useFileUpload() {
 
           if (activeWorkflow === WorkflowType.COMPRESS) {
             updateOutputOptions({ format: OutputFormat.PDF, compress: true, filename: `${fileBaseName}_compressed` });
+            setView(AppView.OUTPUT_OPTIONS);
+          } else if (activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
+            const ext = firstDoc.filename.toLowerCase();
+            let format = OutputFormat.JPEG;
+            if (ext.endsWith('.png')) format = OutputFormat.PNG;
+            else if (ext.endsWith('.tiff') || ext.endsWith('.tif')) format = OutputFormat.TIFF;
+
+            updateOutputOptions({ format, compress: true, filename: `${fileBaseName}_compressed` });
             setView(AppView.OUTPUT_OPTIONS);
           } else if (activeWorkflow === WorkflowType.PROTECT) {
             updateOutputOptions({ format: OutputFormat.PDF, protection: { enabled: true }, filename: `${fileBaseName}_protected` });

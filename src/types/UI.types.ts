@@ -29,6 +29,7 @@ export enum ModalType {
 export enum WorkflowType {
   NONE = 'NONE',
   COMPRESS = 'COMPRESS',
+  COMPRESS_IMAGE = 'COMPRESS_IMAGE',
   MERGE = 'MERGE',
   CONVERT = 'CONVERT',
   SPLIT = 'SPLIT',

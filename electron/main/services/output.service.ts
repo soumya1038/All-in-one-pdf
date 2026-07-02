@@ -9,6 +9,7 @@ import { FileService } from './file.service';
 import { sanitizeFilename } from '../../../src/utils/sanitizeFilename';
 import { getTempFilePath } from '../utils/tempDir';
 import Store from 'electron-store';
+import sharp from 'sharp';
 
 const store = new Store<{ recentFiles: RecentFile[] }>();
 const MAX_RECENT_FILES = 20;
@@ -128,8 +129,104 @@ export class OutputService {
         };
       }
 
-      // 3. Process PDF (Merge or Single)
       let finalTempPath = documents[0].tempPath;
+
+      // 3. Process Image Compression Workflow directly if selected
+      const isCompressImage = options.workflow === 'COMPRESS_IMAGE';
+
+      if (isCompressImage) {
+        const inputDoc = documents[0];
+        // Calculate quality based on compressionLevel or targetSize
+        let quality = 65;
+        if (options.targetSize) {
+          try {
+            const stats = await stat(inputDoc.tempPath);
+            const ratio = options.targetSize / stats.size;
+            quality = Math.max(10, Math.min(95, Math.round(ratio * 80)));
+          } catch {}
+        } else if (options.compressionLevel) {
+          quality = options.compressionLevel === 'low' ? 85
+            : options.compressionLevel === 'medium' ? 65
+            : options.compressionLevel === 'high' ? 45
+            : 25;
+        }
+
+        // Compress image using sharp
+        const tempCompressedPath = getTempFilePath(`compressed_image_${Date.now()}.${options.format.toLowerCase()}`);
+        
+        try {
+          const sharpInstance = sharp(inputDoc.tempPath);
+
+          if (options.format === OutputFormat.PDF) {
+            // If output format is PDF, first compress the image as JPEG, then convert to PDF
+            const imageTempPath = getTempFilePath(`compressed_img_part_${Date.now()}.jpg`);
+            await sharpInstance.jpeg({ quality, mozjpeg: true }).toFile(imageTempPath);
+            
+            const pdfResult = await this.pdfService.merge([imageTempPath], tempCompressedPath);
+            await unlink(imageTempPath).catch(() => {});
+            
+            if (!pdfResult.success) {
+              return pdfResult as Result<ProcessingResult>;
+            }
+            finalTempPath = tempCompressedPath;
+          } else {
+            // Direct image to image compression
+            const formatUpper = options.format.toUpperCase();
+            if (formatUpper === 'JPEG') {
+              await sharpInstance.jpeg({ quality, mozjpeg: true }).toFile(outputPath);
+            } else if (formatUpper === 'PNG') {
+              // Use compressionLevel and palette optimization for PNG
+              await sharpInstance.png({ compressionLevel: 9, palette: true }).toFile(outputPath);
+            } else if (formatUpper === 'TIFF') {
+              await sharpInstance.tiff({ quality, compression: 'jpeg' }).toFile(outputPath);
+            } else {
+              // Fallback
+              await copyFile(inputDoc.tempPath, outputPath);
+            }
+
+            const duration = Date.now() - startTime;
+            let outSize = 0;
+            try {
+              const stats = await stat(outputPath);
+              outSize = stats.size;
+            } catch {}
+
+            this.lastOutputPath = outputPath;
+
+            // Persist to recent files
+            const recentFile: RecentFile = {
+              filename: basename(outputPath),
+              path: outputPath,
+              timestamp: Date.now(),
+              operation: 'compress_image',
+            };
+            const recentFiles = store.get('recentFiles', []);
+            const updatedRecent = [
+              recentFile,
+              ...recentFiles.filter((f) => f.path !== outputPath),
+            ].slice(0, MAX_RECENT_FILES);
+            store.set('recentFiles', updatedRecent);
+
+            return {
+              success: true,
+              data: {
+                outputPath,
+                outputSize: outSize,
+                duration,
+              },
+            };
+          }
+        } catch (err) {
+          return {
+            success: false,
+            error: {
+              code: ErrorCode.UNKNOWN_ERROR,
+              message: err instanceof Error ? err.message : 'Image compression failed',
+              recoverable: true,
+            },
+          };
+        }
+      }
 
 
       const needsMergeOrConversion = 

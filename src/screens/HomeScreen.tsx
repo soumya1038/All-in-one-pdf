@@ -35,6 +35,10 @@ function HomeScreen() {
         properties = ['openFile'];
         extensions = ['pdf'];
         name = 'PDF Documents';
+      } else if (activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
+        properties = ['openFile'];
+        extensions = ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'bmp'];
+        name = 'Image Files';
       } else if (activeWorkflow === WorkflowType.MERGE) {
         properties = ['openFile', 'multiSelections'];
         extensions = ['pdf'];
@@ -99,6 +103,11 @@ function HomeScreen() {
         return {
           title: 'Compress PDF',
           subtitle: 'Upload or drop exactly one PDF file to reduce its size'
+        };
+      case WorkflowType.COMPRESS_IMAGE:
+        return {
+          title: 'Compress Image',
+          subtitle: 'Upload or drop exactly one image file to reduce its size'
         };
       case WorkflowType.MERGE:
         return {

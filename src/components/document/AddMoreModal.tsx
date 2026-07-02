@@ -24,6 +24,10 @@ function AddMoreModal() {
         properties = ['openFile'];
         extensions = ['pdf'];
         name = 'PDF Documents';
+      } else if (activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
+        properties = ['openFile'];
+        extensions = ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'bmp'];
+        name = 'Image Files';
       } else if (activeWorkflow === WorkflowType.MERGE) {
         properties = ['openFile', 'multiSelections'];
         extensions = ['pdf'];
