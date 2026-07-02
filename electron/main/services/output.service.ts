@@ -1,6 +1,6 @@
 import { dialog } from 'electron';
 import { join, basename } from 'path';
-import { copyFile, unlink, stat } from 'fs/promises';
+import { copyFile, unlink, stat, readFile } from 'fs/promises';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
 import { OutputOptions, ProcessingResult, OutputFormat } from '../../../src/types/Output.types';
 import { RecentFile } from '../../../src/types/Document.types';
@@ -404,6 +404,113 @@ export class OutputService {
    */
   async save(_outputPath: string): Promise<Result<void>> {
     return { success: true, data: undefined };
+  }
+
+  /**
+   * Estimate the size of the compressed image dynamically in-memory using binary search.
+   */
+  async estimateCompressedSize(
+    documentId: string,
+    targetSize: number,
+    format: string
+  ): Promise<Result<number>> {
+    try {
+      const doc = this.fileService.getDocument(documentId);
+      if (!doc) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: 'Document not found',
+            recoverable: false,
+          },
+        };
+      }
+
+      const inputBuffer = await readFile(doc.tempPath);
+      const sharpInstance = sharp(inputBuffer);
+
+      let qualityMin = 5;
+      let qualityMax = 100;
+      let quality = 60;
+      let bestSize = 0;
+
+      const formatUpper = format.toUpperCase();
+
+      if (formatUpper === 'PNG') {
+        const stats = await stat(doc.tempPath);
+        if (targetSize < stats.size * 0.4) {
+          const buf = await sharpInstance.png({ compressionLevel: 9, palette: true }).toBuffer();
+          return { success: true, data: buf.length };
+        } else {
+          const buf = await sharpInstance.png({ compressionLevel: 6, palette: false }).toBuffer();
+          return { success: true, data: buf.length };
+        }
+      }
+
+      // JPEG / TIFF binary search
+      for (let i = 0; i < 6; i++) {
+        quality = Math.round((qualityMin + qualityMax) / 2);
+        let buf: Buffer;
+        if (formatUpper === 'TIFF') {
+          buf = await sharp(inputBuffer).tiff({ quality, compression: 'jpeg' }).toBuffer();
+        } else {
+          buf = await sharp(inputBuffer).jpeg({ quality, mozjpeg: true }).toBuffer();
+        }
+
+        const size = buf.length;
+        if (size <= targetSize) {
+          bestSize = size;
+          qualityMin = quality + 1;
+        } else {
+          qualityMax = quality - 1;
+          if (bestSize === 0 || size < bestSize) {
+            bestSize = size;
+          }
+        }
+      }
+
+      // JPEG / TIFF binary search scale if quality=5 is still too large
+      if (bestSize > targetSize * 1.1) {
+        let scaleMin = 0.2;
+        let scaleMax = 1.0;
+        let scale = 1.0;
+
+        const metadata = await sharpInstance.metadata();
+        const width = metadata.width || 800;
+
+        for (let i = 0; i < 5; i++) {
+          scale = (scaleMin + scaleMax) / 2;
+          const resizedWidth = Math.round(width * scale);
+          
+          let buf: Buffer;
+          if (formatUpper === 'TIFF') {
+            buf = await sharp(inputBuffer).resize({ width: resizedWidth }).tiff({ quality: 15, compression: 'jpeg' }).toBuffer();
+          } else {
+            buf = await sharp(inputBuffer).resize({ width: resizedWidth }).jpeg({ quality: 15, mozjpeg: true }).toBuffer();
+          }
+
+          const size = buf.length;
+          if (size <= targetSize) {
+            bestSize = size;
+            scaleMin = scale + 0.05;
+          } else {
+            scaleMax = scale - 0.05;
+          }
+        }
+      }
+
+      return { success: true, data: bestSize };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: error instanceof Error ? error.message : 'Estimation failed',
+          recoverable: true,
+        },
+      };
+    }
   }
 
   /**

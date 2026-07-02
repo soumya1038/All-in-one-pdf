@@ -50,6 +50,32 @@ function OutputScreen() {
   const [splitMode, setSplitMode] = useState<'single' | 'custom'>('single');
   const [checkedPoints, setCheckedPoints] = useState<Record<number, boolean>>({});
 
+  // Image compression slider states
+  const [targetSize, setTargetSize] = useState<number>(() => Math.round(totalOriginalSize * 0.5));
+  const [estimatedSize, setEstimatedSize] = useState<number | null>(null);
+  const [isEstimating, setIsEstimating] = useState(false);
+
+  // Debounced estimation effect
+  useEffect(() => {
+    if (activeWorkflow !== WorkflowType.COMPRESS_IMAGE || !documents[0]) return;
+    
+    setIsEstimating(true);
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        const res = await window.electron.estimateImageSize(documents[0].id, targetSize, format);
+        if (res.success && res.data !== undefined) {
+          setEstimatedSize(res.data);
+        }
+      } catch (err) {
+        console.error('Estimation failed', err);
+      } finally {
+        setIsEstimating(false);
+      }
+    }, 150);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [targetSize, format, activeWorkflow, documents]);
+
   const pageCount = documents[0]?.pageCount || 1;
 
   // Preview panel states
@@ -211,6 +237,7 @@ function OutputScreen() {
       format,
       compress: activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE || isCompressEnabled,
       compressionLevel,
+      targetSize: activeWorkflow === WorkflowType.COMPRESS_IMAGE ? targetSize : undefined,
       pdfPageSize: pageSize,
       imageDpi: dpi,
       mergeAsSingle: activeWorkflow === WorkflowType.MERGE ? true : mergeAsSingle,
@@ -480,28 +507,79 @@ function OutputScreen() {
               </div>
             )}
 
-            {/* Compression Level Selector */}
+            {/* Compression Level / Target Size Selector */}
             {showTargetSize && (
               <div>
-                <label className="block text-sm font-medium text-text-primary mb-1">
-                  Compression Level {(activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE) ? '(Required)' : '(Optional)'}
-                </label>
-                <select
-                  value={compressionOption}
-                  onChange={(e) => setCompressionOption(e.target.value)}
-                  className="w-full px-3 py-2 bg-bg-surface border border-border rounded-sm focus:outline-none focus:ring-2 focus:ring-border-focus text-base"
-                >
-                  {activeWorkflow !== WorkflowType.COMPRESS && activeWorkflow !== WorkflowType.COMPRESS_IMAGE && (
-                    <option value="none">None — Keep original size</option>
-                  )}
-                  <option value="low">Low (~{formatFileSize(totalOriginalSize * 0.8)}) — Best quality</option>
-                  <option value="medium">Medium (~{formatFileSize(totalOriginalSize * 0.5)}) — Balanced</option>
-                  <option value="high">High (~{formatFileSize(totalOriginalSize * 0.3)}) — Space saver</option>
-                  <option value="extreme">Extreme (~{formatFileSize(totalOriginalSize * 0.15)}) — Smallest size</option>
-                </select>
-                <p className="mt-1 text-xs text-text-muted">
-                  Estimated sizes are approximate. Actual results will vary depending on document content.
-                </p>
+                {activeWorkflow === WorkflowType.COMPRESS_IMAGE ? (
+                  <div className="space-y-4 border border-border rounded-md p-4 bg-bg-surface shadow-sm">
+                    <div className="flex justify-between items-center">
+                      <label className="text-sm font-semibold text-text-primary">
+                        Target File Size
+                      </label>
+                      <span className="text-sm font-bold text-accent bg-accent-light/10 px-2.5 py-0.5 rounded border border-accent/20">
+                        {formatFileSize(targetSize)}
+                      </span>
+                    </div>
+
+                    <input
+                      type="range"
+                      min={Math.round(totalOriginalSize * 0.05)}
+                      max={totalOriginalSize}
+                      step={Math.max(1, Math.round(totalOriginalSize * 0.01))}
+                      value={targetSize}
+                      onChange={(e) => setTargetSize(parseInt(e.target.value))}
+                      className="w-full h-2 bg-bg-sunken rounded-lg appearance-none cursor-pointer accent-accent"
+                    />
+
+                    <div className="flex justify-between text-[10px] text-text-muted font-medium font-mono uppercase tracking-wider select-none">
+                      <span>Min (~{formatFileSize(totalOriginalSize * 0.05)})</span>
+                      <span>Original ({formatFileSize(totalOriginalSize)})</span>
+                    </div>
+
+                    {/* Real-time Preview Size Card */}
+                    <div className="p-3 bg-bg-sunken border border-border rounded-sm flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">
+                          Real-Time Output Preview
+                        </span>
+                        <span className="text-xs text-text-muted mt-0.5">
+                          Adjusting quality/dimensions to match target
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isEstimating ? (
+                          <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <span className="text-sm font-bold text-text-primary font-mono">
+                            {estimatedSize ? formatFileSize(estimatedSize) : 'Estimating...'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-text-primary mb-1">
+                      Compression Level {activeWorkflow === WorkflowType.COMPRESS ? '(Required)' : '(Optional)'}
+                    </label>
+                    <select
+                      value={compressionOption}
+                      onChange={(e) => setCompressionOption(e.target.value)}
+                      className="w-full px-3 py-2 bg-bg-surface border border-border rounded-sm focus:outline-none focus:ring-2 focus:ring-border-focus text-base"
+                    >
+                      {activeWorkflow !== WorkflowType.COMPRESS && (
+                        <option value="none">None — Keep original size</option>
+                      )}
+                      <option value="low">Low (~{formatFileSize(totalOriginalSize * 0.8)}) — Best quality</option>
+                      <option value="medium">Medium (~{formatFileSize(totalOriginalSize * 0.5)}) — Balanced</option>
+                      <option value="high">High (~{formatFileSize(totalOriginalSize * 0.3)}) — Space saver</option>
+                      <option value="extreme">Extreme (~{formatFileSize(totalOriginalSize * 0.15)}) — Smallest size</option>
+                    </select>
+                    <p className="mt-1 text-xs text-text-muted">
+                      Estimated sizes are approximate. Actual results will vary depending on document content.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

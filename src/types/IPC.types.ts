@@ -12,6 +12,7 @@ export enum IpcChannel {
   FILE_DELETE = 'docuflow:file:delete',
   FILE_VALIDATE = 'docuflow:file:validate',
   FILE_GET_THUMBNAIL = 'docuflow:file:getThumbnail',
+  IMAGE_ESTIMATE_SIZE = 'docuflow:image:estimateSize',
   
   // Scanner operations
   SCANNER_LIST = 'docuflow:scanner:list',
@@ -166,6 +167,7 @@ export interface IpcApi {
   deleteFile: (documentId: string) => Promise<Result<void>>;
   validateFile: (filePath: string) => Promise<Result<FileValidationResponse>>;
   getThumbnail: (documentId: string) => Promise<Result<string>>;
+  estimateImageSize: (documentId: string, targetSize: number, format: string) => Promise<Result<number>>;
   
   // Scanner operations
   listScanners: () => Promise<Result<ScannerDevice[]>>;

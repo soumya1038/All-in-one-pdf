@@ -21,6 +21,9 @@ const api: IpcApi = {
   getThumbnail: (documentId) =>
     ipcRenderer.invoke(IpcChannel.FILE_GET_THUMBNAIL, documentId),
 
+  estimateImageSize: (documentId, targetSize, format) =>
+    ipcRenderer.invoke(IpcChannel.IMAGE_ESTIMATE_SIZE, { documentId, targetSize, format }),
+
   // Scanner operations
   listScanners: () =>
     ipcRenderer.invoke(IpcChannel.SCANNER_LIST),

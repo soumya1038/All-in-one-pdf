@@ -16,6 +16,13 @@ export function registerOutputHandlers(): void {
   });
 
   /**
+   * Estimate compressed image size
+   */
+  ipcMain.handle(IpcChannel.IMAGE_ESTIMATE_SIZE, async (_, { documentId, targetSize, format }) => {
+    return await outputService.estimateCompressedSize(documentId, targetSize, format);
+  });
+
+  /**
    * Save output to specified path
    */
   ipcMain.handle(IpcChannel.OUTPUT_SAVE, async (_, outputPath: string) => {
