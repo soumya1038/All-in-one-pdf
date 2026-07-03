@@ -1,9 +1,9 @@
 import { dialog } from 'electron';
-import { join, basename } from 'path';
+import { join, basename, extname } from 'path';
 import { copyFile, unlink, stat, readFile } from 'fs/promises';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
 import { OutputOptions, ProcessingResult, OutputFormat } from '../../../src/types/Output.types';
-import { RecentFile } from '../../../src/types/Document.types';
+import { DocumentItem, DocumentType, RecentFile } from '../../../src/types/Document.types';
 import { PdfService } from './pdf.service';
 import { FileService } from './file.service';
 import { sanitizeFilename } from '../../../src/utils/sanitizeFilename';
@@ -48,13 +48,26 @@ export class OutputService {
         };
       }
 
+      const unsupportedDocument = documents.find((doc) => !this.isSupportedInput(doc));
+      if (unsupportedDocument) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.FILE_UNSUPPORTED,
+            message: `"${unsupportedDocument.filename}" is not supported for processing yet. Please use PDF or image files.`,
+            recoverable: false,
+          },
+        };
+      }
+
       const isSplit = options.splitPoints && options.splitPoints.length > 0;
+      const isBatchFolderOutput = !isSplit && documents.length > 1 && !options.mergeAsSingle;
       let outputPath = '';
 
-      if (isSplit) {
-        // For splitting, ask user to select destination folder
+      if (isSplit || isBatchFolderOutput) {
+        // For split and separate multi-file exports, ask for a destination folder.
         const folderDialogResult = await dialog.showOpenDialog({
-          title: 'Select Destination Folder for Split PDFs',
+          title: isSplit ? 'Select Destination Folder for Split PDFs' : 'Select Destination Folder',
           properties: ['openDirectory', 'createDirectory'],
         });
 
@@ -110,23 +123,42 @@ export class OutputService {
 
 
 
-        for (const tempPath of splitResult.data) {
-          const fileName = basename(tempPath);
-          const finalPath = join(outputPath, fileName);
+        const outputPaths: string[] = [];
+        let outputSize = 0;
+        const prefix = this.getOutputBaseName(options.filename || documents[0].filename);
+
+        for (let index = 0; index < splitResult.data.length; index++) {
+          const tempPath = splitResult.data[index];
+          const finalPath = join(outputPath, `${prefix}_part${index + 1}.pdf`);
           await copyFile(tempPath, finalPath);
+          outputPaths.push(finalPath);
+          outputSize += await this.getFileSize(finalPath);
           // Clean up temp parts
           await unlink(tempPath).catch(() => {});
         }
 
         const duration = Date.now() - startTime;
+        await this.addRecentFile({
+          filename: basename(outputPath),
+          path: outputPath,
+          timestamp: Date.now(),
+          operation: 'split',
+        });
+
         return {
           success: true,
           data: {
             outputPath,
-            outputSize: 0,
+            outputPaths,
+            isFolderOutput: true,
+            outputSize,
             duration,
           },
         };
+      }
+
+      if (isBatchFolderOutput) {
+        return await this.processBatchPdfOutput(documents, outputPath, options, startTime);
       }
 
       let finalTempPath = documents[0].tempPath;
@@ -136,86 +168,80 @@ export class OutputService {
 
       if (isCompressImage) {
         const inputDoc = documents[0];
-        // Calculate quality based on compressionLevel or targetSize
-        let quality = 65;
-        if (options.targetSize) {
+        // Calculate targetSize based on options.targetSize or compressionLevel
+        let targetSize = options.targetSize;
+        if (!targetSize) {
           try {
             const stats = await stat(inputDoc.tempPath);
-            const ratio = options.targetSize / stats.size;
-            quality = Math.max(10, Math.min(95, Math.round(ratio * 80)));
-          } catch {}
-        } else if (options.compressionLevel) {
-          quality = options.compressionLevel === 'low' ? 85
-            : options.compressionLevel === 'medium' ? 65
-            : options.compressionLevel === 'high' ? 45
-            : 25;
+            const ratio = options.compressionLevel === 'low' ? 0.8
+              : options.compressionLevel === 'medium' ? 0.5
+              : options.compressionLevel === 'high' ? 0.3
+              : 0.15;
+            targetSize = Math.round(stats.size * ratio);
+          } catch {
+            targetSize = 1024 * 100; // default 100kb fallback
+          }
         }
 
-        // Compress image using sharp
         const tempCompressedPath = getTempFilePath(`compressed_image_${Date.now()}.${options.format.toLowerCase()}`);
         
         try {
-          const sharpInstance = sharp(inputDoc.tempPath);
+          // Fit the image dynamically using our search helper
+          const compressedBuffer = await this.fitImageToTargetSize(inputDoc.tempPath, targetSize, options.format);
 
           if (options.format === OutputFormat.PDF) {
-            // If output format is PDF, first compress the image as JPEG, then convert to PDF
+            // If output format is PDF, first write the compressed image as JPEG, then convert to PDF
             const imageTempPath = getTempFilePath(`compressed_img_part_${Date.now()}.jpg`);
-            await sharpInstance.jpeg({ quality, mozjpeg: true }).toFile(imageTempPath);
+            await sharp(compressedBuffer).toFile(imageTempPath);
             
-            const pdfResult = await this.pdfService.merge([imageTempPath], tempCompressedPath);
+            const pdfResult = await this.pdfService.merge([imageTempPath], tempCompressedPath, options.pdfPageSize);
             await unlink(imageTempPath).catch(() => {});
             
             if (!pdfResult.success) {
               return pdfResult as Result<ProcessingResult>;
             }
-            finalTempPath = tempCompressedPath;
+
+            // Copy to final outputPath
+            await copyFile(tempCompressedPath, outputPath);
+            await unlink(tempCompressedPath).catch(() => {});
           } else {
             // Direct image to image compression
-            const formatUpper = options.format.toUpperCase();
-            if (formatUpper === 'JPEG') {
-              await sharpInstance.jpeg({ quality, mozjpeg: true }).toFile(outputPath);
-            } else if (formatUpper === 'PNG') {
-              // Use compressionLevel and palette optimization for PNG
-              await sharpInstance.png({ compressionLevel: 9, palette: true }).toFile(outputPath);
-            } else if (formatUpper === 'TIFF') {
-              await sharpInstance.tiff({ quality, compression: 'jpeg' }).toFile(outputPath);
-            } else {
-              // Fallback
-              await copyFile(inputDoc.tempPath, outputPath);
-            }
-
-            const duration = Date.now() - startTime;
-            let outSize = 0;
-            try {
-              const stats = await stat(outputPath);
-              outSize = stats.size;
-            } catch {}
-
-            this.lastOutputPath = outputPath;
-
-            // Persist to recent files
-            const recentFile: RecentFile = {
-              filename: basename(outputPath),
-              path: outputPath,
-              timestamp: Date.now(),
-              operation: 'compress_image',
-            };
-            const recentFiles = store.get('recentFiles', []);
-            const updatedRecent = [
-              recentFile,
-              ...recentFiles.filter((f) => f.path !== outputPath),
-            ].slice(0, MAX_RECENT_FILES);
-            store.set('recentFiles', updatedRecent);
-
-            return {
-              success: true,
-              data: {
-                outputPath,
-                outputSize: outSize,
-                duration,
-              },
-            };
+            await sharp(compressedBuffer).toFile(outputPath);
           }
+
+          const duration = Date.now() - startTime;
+          let outSize = 0;
+          try {
+            const stats = await stat(outputPath);
+            outSize = stats.size;
+          } catch {
+            outSize = 0;
+          }
+
+          this.lastOutputPath = outputPath;
+
+          // Persist to recent files
+          const recentFile: RecentFile = {
+            filename: basename(outputPath),
+            path: outputPath,
+            timestamp: Date.now(),
+            operation: 'compress_image',
+          };
+          const recentFiles = store.get('recentFiles', []);
+          const updatedRecent = [
+            recentFile,
+            ...recentFiles.filter((f) => f.path !== outputPath),
+          ].slice(0, MAX_RECENT_FILES);
+          store.set('recentFiles', updatedRecent);
+
+          return {
+            success: true,
+            data: {
+              outputPath,
+              outputSize: outSize,
+              duration,
+            },
+          };
         } catch (err) {
           return {
             success: false,
@@ -228,6 +254,44 @@ export class OutputService {
         }
       }
 
+      if (
+        documents.length === 1 &&
+        documents[0].type === DocumentType.IMAGE &&
+        options.format !== OutputFormat.PDF
+      ) {
+        if (options.format === OutputFormat.DOCX) {
+          return {
+            success: false,
+            error: {
+              code: ErrorCode.PDF_CONVERT_FAILED,
+              message: 'Image to Word conversion is not supported. Choose PDF, JPEG, PNG, or TIFF.',
+              recoverable: false,
+            },
+          };
+        }
+
+        await this.convertImageFile(documents[0].tempPath, outputPath, options.format);
+        const duration = Date.now() - startTime;
+        const outputSize = await this.getFileSize(outputPath);
+
+        this.lastOutputPath = outputPath;
+        await this.addRecentFile({
+          filename: basename(outputPath),
+          path: outputPath,
+          timestamp: Date.now(),
+          operation: 'convert',
+        });
+
+        return {
+          success: true,
+          data: {
+            outputPath,
+            outputSize,
+            duration,
+          },
+        };
+      }
+
 
       const needsMergeOrConversion = 
         documents.length > 1 || 
@@ -236,7 +300,7 @@ export class OutputService {
       if (needsMergeOrConversion) {
         const documentPaths = documents.map((doc) => doc.tempPath);
         const mergeTempPath = getTempFilePath(`merged_${Date.now()}.pdf`);
-        const mergeResult = await this.pdfService.merge(documentPaths, mergeTempPath);
+        const mergeResult = await this.pdfService.merge(documentPaths, mergeTempPath, options.pdfPageSize);
 
         if (!mergeResult.success) {
           return mergeResult as Result<ProcessingResult>;
@@ -310,7 +374,9 @@ export class OutputService {
         try {
           const stats = await stat(convertResult.data!);
           outSize = stats.size;
-        } catch {}
+        } catch {
+          outSize = 0;
+        }
 
         this.lastOutputPath = convertResult.data!;
 
@@ -391,6 +457,169 @@ export class OutputService {
     }
   }
 
+  private async processBatchPdfOutput(
+    documents: DocumentItem[],
+    outputFolder: string,
+    options: OutputOptions,
+    startTime: number
+  ): Promise<Result<ProcessingResult>> {
+    if (options.format !== OutputFormat.PDF) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.PDF_CONVERT_FAILED,
+          message: 'Separate multi-file export is supported for PDF output only.',
+          recoverable: false,
+        },
+      };
+    }
+
+    const outputPaths: string[] = [];
+    let outputSize = 0;
+
+    try {
+      for (let index = 0; index < documents.length; index++) {
+        const document = documents[index];
+        let workingPath = document.tempPath;
+        const tempPathsToClean: string[] = [];
+
+        if (document.type === DocumentType.IMAGE) {
+          const imagePdfPath = getTempFilePath(`batch_${document.id}_${Date.now()}.pdf`);
+          const mergeResult = await this.pdfService.merge([document.tempPath], imagePdfPath, options.pdfPageSize);
+          if (!mergeResult.success) {
+            return mergeResult as Result<ProcessingResult>;
+          }
+          workingPath = imagePdfPath;
+          tempPathsToClean.push(imagePdfPath);
+        }
+
+        if (options.compress || options.targetSize) {
+          const inputSize = await this.getFileSize(workingPath);
+          const targetSize = this.getCompressionTargetSize(inputSize, options);
+          const compressResult = await this.pdfService.compressFile(workingPath, targetSize);
+          if (!compressResult.success) {
+            return compressResult as Result<ProcessingResult>;
+          }
+          workingPath = compressResult.data;
+          tempPathsToClean.push(workingPath);
+        }
+
+        if (options.protection?.enabled) {
+          const protectResult = await this.pdfService.protectFile(
+            workingPath,
+            options.protection.ownerPassword,
+            options.protection.userPassword
+          );
+          if (!protectResult.success) {
+            return protectResult as Result<ProcessingResult>;
+          }
+          workingPath = protectResult.data;
+          tempPathsToClean.push(workingPath);
+        }
+
+        const baseName = this.getOutputBaseName(document.filename);
+        const finalPath = join(outputFolder, `${baseName}_${index + 1}.pdf`);
+        await copyFile(workingPath, finalPath);
+        outputPaths.push(finalPath);
+        outputSize += await this.getFileSize(finalPath);
+
+        for (const tempPath of tempPathsToClean) {
+          if (tempPath !== document.tempPath) {
+            await unlink(tempPath).catch(() => {});
+          }
+        }
+      }
+
+      await this.addRecentFile({
+        filename: basename(outputFolder),
+        path: outputFolder,
+        timestamp: Date.now(),
+        operation: 'export',
+      });
+
+      return {
+        success: true,
+        data: {
+          outputPath: outputFolder,
+          outputPaths,
+          isFolderOutput: true,
+          outputSize,
+          duration: Date.now() - startTime,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to export separate PDF files',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  }
+
+  private async convertImageFile(
+    inputPath: string,
+    outputPath: string,
+    format: OutputFormat
+  ): Promise<void> {
+    const image = sharp(inputPath);
+
+    if (format === OutputFormat.JPEG) {
+      await image.jpeg({ quality: 92, mozjpeg: true }).toFile(outputPath);
+    } else if (format === OutputFormat.PNG) {
+      await image.png({ compressionLevel: 9 }).toFile(outputPath);
+    } else if (format === OutputFormat.TIFF) {
+      await image.tiff({ quality: 90, compression: 'jpeg' }).toFile(outputPath);
+    } else {
+      throw new Error(`Unsupported image output format: ${format}`);
+    }
+  }
+
+  private isSupportedInput(document: DocumentItem): boolean {
+    return document.type === DocumentType.PDF || document.type === DocumentType.IMAGE;
+  }
+
+  private getOutputBaseName(filename: string): string {
+    const withoutExtension = filename.slice(0, filename.length - extname(filename).length) || filename;
+    const sanitized = sanitizeFilename(withoutExtension).replace(/\.+$/g, '').trim();
+    return sanitized || 'DocuFlow_Output';
+  }
+
+  private async getFileSize(filePath: string): Promise<number> {
+    try {
+      const stats = await stat(filePath);
+      return stats.size;
+    } catch {
+      return 0;
+    }
+  }
+
+  private getCompressionTargetSize(inputSize: number, options: OutputOptions): number | undefined {
+    if (options.targetSize) {
+      return options.targetSize;
+    }
+
+    if (!options.compressionLevel || inputSize <= 0) {
+      return undefined;
+    }
+
+    const ratio = options.compressionLevel === 'low' ? 0.8
+      : options.compressionLevel === 'medium' ? 0.5
+      : options.compressionLevel === 'high' ? 0.3
+      : 0.15;
+
+    return Math.round(inputSize * ratio);
+  }
+
+  private async addRecentFile(file: RecentFile): Promise<void> {
+    const existing = store.get('recentFiles', []);
+    const filtered = existing.filter((f) => f.path !== file.path);
+    store.set('recentFiles', [file, ...filtered].slice(0, MAX_RECENT_FILES));
+  }
+
   /**
    * Get last output path
    */
@@ -404,6 +633,135 @@ export class OutputService {
    */
   async save(_outputPath: string): Promise<Result<void>> {
     return { success: true, data: undefined };
+  }
+
+  /**
+   * Iteratively compress and resize the image to fit the target size with 99%+ accuracy.
+   */
+  private async fitImageToTargetSize(
+    inputPath: string,
+    targetSize: number,
+    format: string
+  ): Promise<Buffer> {
+    const inputBuffer = await readFile(inputPath);
+    const formatUpper = format.toUpperCase() === 'PDF' ? 'JPEG' : format.toUpperCase();
+
+    // 1. Try a high-quality (quality = 90) or standard compression first
+    let currentBuffer: Buffer;
+    if (formatUpper === 'PNG') {
+      currentBuffer = await sharp(inputBuffer).png({ compressionLevel: 9, palette: true }).toBuffer();
+    } else if (formatUpper === 'TIFF') {
+      currentBuffer = await sharp(inputBuffer).tiff({ quality: 90, compression: 'jpeg' }).toBuffer();
+    } else {
+      currentBuffer = await sharp(inputBuffer).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+    }
+
+    // If it already fits the target size, we don't need to reduce quality further
+    if (currentBuffer.length <= targetSize) {
+      return currentBuffer;
+    }
+
+    // 2. Binary search on quality (for JPEG / TIFF)
+    let bestBuffer = currentBuffer;
+    if (formatUpper !== 'PNG') {
+      let qMin = 5;
+      let qMax = 95;
+      
+      for (let i = 0; i < 6; i++) {
+        const qVal = Math.round((qMin + qMax) / 2);
+        let buf: Buffer;
+        if (formatUpper === 'TIFF') {
+          buf = await sharp(inputBuffer).tiff({ quality: qVal, compression: 'jpeg' }).toBuffer();
+        } else {
+          buf = await sharp(inputBuffer).jpeg({ quality: qVal, mozjpeg: true }).toBuffer();
+        }
+
+        if (buf.length <= targetSize) {
+          bestBuffer = buf;
+          qMin = qVal + 1; // Try higher quality
+        } else {
+          qMax = qVal - 1; // Needs more compression
+          if (buf.length < bestBuffer.length) {
+            bestBuffer = buf;
+          }
+        }
+      }
+
+      currentBuffer = bestBuffer;
+      // If we are within target, return it!
+      if (currentBuffer.length <= targetSize) {
+        return currentBuffer;
+      }
+    }
+
+    // 3. If target size is still not met (even at quality = 5), or if it is PNG, we must resize (scale down)
+    const metadata = await sharp(inputBuffer).metadata();
+    const origWidth = metadata.width || 800;
+
+    let sMin = 0.1;
+    let sMax = 0.95;
+    let bestScale = 1.0;
+
+    for (let i = 0; i < 6; i++) {
+      const sVal = (sMin + sMax) / 2;
+      const resizedWidth = Math.round(origWidth * sVal);
+      let buf: Buffer;
+
+      if (formatUpper === 'PNG') {
+        buf = await sharp(inputBuffer)
+          .resize({ width: resizedWidth })
+          .png({ compressionLevel: 9, palette: true })
+          .toBuffer();
+      } else if (formatUpper === 'TIFF') {
+        buf = await sharp(inputBuffer)
+          .resize({ width: resizedWidth })
+          .tiff({ quality: 15, compression: 'jpeg' })
+          .toBuffer();
+      } else {
+        buf = await sharp(inputBuffer)
+          .resize({ width: resizedWidth })
+          .jpeg({ quality: 15, mozjpeg: true })
+          .toBuffer();
+      }
+
+      if (buf.length <= targetSize) {
+        bestScale = sVal;
+        bestBuffer = buf;
+        sMin = sVal + 0.02; // Try larger resolution
+      } else {
+        sMax = sVal - 0.02; // Need to shrink more
+        if (buf.length < bestBuffer.length) {
+          bestScale = sVal;
+          bestBuffer = buf;
+        }
+      }
+    }
+
+    // 4. Fine-tune quality for JPEG / TIFF on the best scaled image if it's still slightly over target
+    if (formatUpper !== 'PNG' && bestBuffer.length > targetSize) {
+      const resizedWidth = Math.round(origWidth * bestScale);
+      let qMin = 5;
+      let qMax = 30;
+
+      for (let i = 0; i < 4; i++) {
+        const qVal = Math.round((qMin + qMax) / 2);
+        let buf: Buffer;
+        if (formatUpper === 'TIFF') {
+          buf = await sharp(inputBuffer).resize({ width: resizedWidth }).tiff({ quality: qVal, compression: 'jpeg' }).toBuffer();
+        } else {
+          buf = await sharp(inputBuffer).resize({ width: resizedWidth }).jpeg({ quality: qVal, mozjpeg: true }).toBuffer();
+        }
+
+        if (buf.length <= targetSize) {
+          bestBuffer = buf;
+          qMin = qVal + 1;
+        } else {
+          qMax = qVal - 1;
+        }
+      }
+    }
+
+    return bestBuffer;
   }
 
   /**
@@ -427,80 +785,8 @@ export class OutputService {
         };
       }
 
-      const inputBuffer = await readFile(doc.tempPath);
-      const sharpInstance = sharp(inputBuffer);
-
-      let qualityMin = 5;
-      let qualityMax = 100;
-      let quality = 60;
-      let bestSize = 0;
-
-      const formatUpper = format.toUpperCase();
-
-      if (formatUpper === 'PNG') {
-        const stats = await stat(doc.tempPath);
-        if (targetSize < stats.size * 0.4) {
-          const buf = await sharpInstance.png({ compressionLevel: 9, palette: true }).toBuffer();
-          return { success: true, data: buf.length };
-        } else {
-          const buf = await sharpInstance.png({ compressionLevel: 6, palette: false }).toBuffer();
-          return { success: true, data: buf.length };
-        }
-      }
-
-      // JPEG / TIFF binary search
-      for (let i = 0; i < 6; i++) {
-        quality = Math.round((qualityMin + qualityMax) / 2);
-        let buf: Buffer;
-        if (formatUpper === 'TIFF') {
-          buf = await sharp(inputBuffer).tiff({ quality, compression: 'jpeg' }).toBuffer();
-        } else {
-          buf = await sharp(inputBuffer).jpeg({ quality, mozjpeg: true }).toBuffer();
-        }
-
-        const size = buf.length;
-        if (size <= targetSize) {
-          bestSize = size;
-          qualityMin = quality + 1;
-        } else {
-          qualityMax = quality - 1;
-          if (bestSize === 0 || size < bestSize) {
-            bestSize = size;
-          }
-        }
-      }
-
-      // JPEG / TIFF binary search scale if quality=5 is still too large
-      if (bestSize > targetSize * 1.1) {
-        let scaleMin = 0.2;
-        let scaleMax = 1.0;
-        let scale = 1.0;
-
-        const metadata = await sharpInstance.metadata();
-        const width = metadata.width || 800;
-
-        for (let i = 0; i < 5; i++) {
-          scale = (scaleMin + scaleMax) / 2;
-          const resizedWidth = Math.round(width * scale);
-          
-          let buf: Buffer;
-          if (formatUpper === 'TIFF') {
-            buf = await sharp(inputBuffer).resize({ width: resizedWidth }).tiff({ quality: 15, compression: 'jpeg' }).toBuffer();
-          } else {
-            buf = await sharp(inputBuffer).resize({ width: resizedWidth }).jpeg({ quality: 15, mozjpeg: true }).toBuffer();
-          }
-
-          const size = buf.length;
-          if (size <= targetSize) {
-            bestSize = size;
-            scaleMin = scale + 0.05;
-          } else {
-            scaleMax = scale - 0.05;
-          }
-        }
-      }
-
-      return { success: true, data: bestSize };
+      const compressedBuffer = await this.fitImageToTargetSize(doc.tempPath, targetSize, format);
+      return { success: true, data: compressedBuffer.length };
     } catch (error) {
       return {
         success: false,

@@ -78,6 +78,8 @@ export interface ProcessingStatus {
   estimatedTimeRemaining?: number; // Seconds
   error?: string;
   outputPath?: string;          // Final output file path (set on COMPLETE)
+  outputPaths?: string[];        // Batch outputs such as split PDF parts
+  isFolderOutput?: boolean;      // True when outputPath is a folder
   outputSize?: number;          // Final output file size in bytes (set on COMPLETE)
 }
 
@@ -98,6 +100,8 @@ export interface CompressionBreakdown {
  */
 export interface ProcessingResult {
   outputPath: string;
+  outputPaths?: string[];
+  isFolderOutput?: boolean;
   outputSize: number;
   duration: number;             // Milliseconds
   compressionBreakdown?: CompressionBreakdown[];

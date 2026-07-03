@@ -19,7 +19,7 @@ export class PdfService {
   /**
    * Merge multiple PDFs / images into one PDF at outputPath
    */
-  async merge(documentPaths: string[], outputPath: string): Promise<Result<string>> {
+  async merge(documentPaths: string[], outputPath: string, pageSize?: string): Promise<Result<string>> {
     try {
       if (documentPaths.length === 0) {
         return {
@@ -56,8 +56,24 @@ export class PdfService {
               : await mergedPdf.embedJpg(imageBuffer);
 
             const { width, height } = image.scale(1);
-            const page = mergedPdf.addPage([width, height]);
-            page.drawImage(image, { x: 0, y: 0, width, height });
+            const targetPageSize = this.getPageDimensions(pageSize);
+
+            if (targetPageSize) {
+              const [pageWidth, pageHeight] = targetPageSize;
+              const page = mergedPdf.addPage([pageWidth, pageHeight]);
+              const imageScale = Math.min(pageWidth / width, pageHeight / height);
+              const drawWidth = width * imageScale;
+              const drawHeight = height * imageScale;
+              page.drawImage(image, {
+                x: (pageWidth - drawWidth) / 2,
+                y: (pageHeight - drawHeight) / 2,
+                width: drawWidth,
+                height: drawHeight,
+              });
+            } else {
+              const page = mergedPdf.addPage([width, height]);
+              page.drawImage(image, { x: 0, y: 0, width, height });
+            }
           } else {
             const pdf = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
             const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
@@ -94,6 +110,19 @@ export class PdfService {
     }
   }
 
+  private getPageDimensions(pageSize?: string): [number, number] | null {
+    switch (pageSize) {
+      case 'A4':
+        return [595.28, 841.89];
+      case 'LETTER':
+        return [612, 792];
+      case 'LEGAL':
+        return [612, 1008];
+      default:
+        return null;
+    }
+  }
+
   /**
    * Get page count from a PDF file path
    */
@@ -116,159 +145,135 @@ export class PdfService {
   }
 
   /**
-   * Compress a PDF file using Python + pypdf.
-   * Compresses content streams and uses Pillow (if available/installed automatically)
-   * to re-compress images to a target quality.
+   * Compress a PDF file without relying on external Python packages.
+   * First tries a structure-only rewrite, then rasterizes pages when a target
+   * size requires stronger compression.
    */
   async compressFile(filePath: string, targetSize?: number): Promise<Result<string>> {
     const dir = dirname(filePath);
     const ext = extname(filePath);
     const base = basename(filePath, ext);
     const outputPath = join(dir, `${base}_compressed.pdf`);
-    const scriptPath = getTempFilePath('_compress_script.py');
 
     try {
-      // 1. Get original file size
       let origSize = 0;
       try {
         const stats = await stat(filePath);
         origSize = stats.size;
-      } catch (err) {
-        // Fallback
+      } catch {
+        origSize = 0;
       }
 
-      // 2. Calculate target quality (15-80)
-      let quality = 50; // Default quality
-      if (targetSize && origSize > 0) {
-        const ratio = targetSize / origSize;
-        if (ratio >= 0.9) quality = 80;
-        else if (ratio >= 0.7) quality = 65;
-        else if (ratio >= 0.5) quality = 50;
-        else if (ratio >= 0.3) quality = 30;
-        else quality = 15;
+      await this.rewritePdf(filePath, outputPath);
+
+      const rewrittenStats = await stat(outputPath);
+      if (!targetSize || rewrittenStats.size <= targetSize) {
+        return { success: true, data: outputPath };
       }
 
-      const pyScript = `
-import sys
-import os
-import io
+      await this.rasterCompressPdf(filePath, outputPath, targetSize, origSize || rewrittenStats.size);
 
-# Try importing PIL/Pillow. If not found, attempt automatic installation.
-try:
-    import PIL
-    from PIL import Image
-except ImportError:
-    import subprocess
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "Pillow"])
-        from PIL import Image
-    except Exception as e:
-        print("Failed to auto-install Pillow:", e, file=sys.stderr)
-
-from pypdf import PdfReader, PdfWriter
-
-def compress_pdf(input_path, output_path, target_quality=50):
-    reader = PdfReader(input_path)
-    writer = PdfWriter()
-
-    for page in reader.pages:
-        writer.add_page(page)
-
-    # Compress content streams
-    for page in writer.pages:
-        try:
-            page.compress_content_streams()
-        except Exception:
-            pass
-
-    # Compress images if Pillow is available
-    if "PIL" in sys.modules:
-        for page in writer.pages:
-            try:
-                img_keys = list(page.images.keys())
-            except Exception:
-                img_keys = []
-            
-            for key in img_keys:
-                try:
-                    img_file = page.images[key]
-                    if img_file.data:
-                        img = Image.open(io.BytesIO(img_file.data))
-                        
-                        # Convert to RGB (JPEG does not support transparency/alpha)
-                        if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                            bg = Image.new('RGB', img.size, (255, 255, 255))
-                            if img.mode == 'RGBA':
-                                bg.paste(img, mask=img.split()[3])
-                            else:
-                                bg.paste(img.convert('RGBA'), mask=img.convert('RGBA').split()[3])
-                            img = bg
-                        elif img.mode != 'RGB':
-                            img = img.convert('RGB')
-                        
-                        # Save with target quality
-                        out_bytes = io.BytesIO()
-                        img.save(out_bytes, format='JPEG', quality=target_quality, optimize=True)
-                        page.images[key].replace(img, quality=target_quality)
-                except Exception as ex:
-                    print(f"Skipped image {key}: {ex}", file=sys.stderr)
-
-    with open(output_path, "wb") as f:
-        writer.write(f)
-
-if __name__ == '__main__':
-    compress_pdf(sys.argv[1], sys.argv[2], int(sys.argv[3]))
-    print("SUCCESS")
-`;
-
-      await writeFile(scriptPath, pyScript, 'utf-8');
-
-      await new Promise<void>((resolve, reject) => {
-        const proc = spawn('python', [
-          scriptPath,
-          filePath,
-          outputPath,
-          quality.toString(),
-        ]);
-
-        let stderr = '';
-        proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString(); });
-        proc.on('close', (code: number) => {
-          if (code === 0) resolve();
-          else reject(new Error(stderr || `Python exited with code ${code}`));
-        });
-        proc.on('error', (err: Error) => reject(err));
-      });
-
-      await unlink(scriptPath).catch(() => {});
-
-      // Verify and log sizes
-      try {
-        const newStats = await stat(outputPath);
-        const reduction = origSize > 0 ? (((origSize - newStats.size) / origSize) * 100).toFixed(1) : '0';
-        console.log(`Compressed PDF: ${origSize} → ${newStats.size} bytes (${reduction}% reduction, quality: ${quality})`);
-      } catch (err) {
-        // Ignore stats errors
-      }
+      const newStats = await stat(outputPath);
+      const reduction = origSize > 0 ? (((origSize - newStats.size) / origSize) * 100).toFixed(1) : '0';
+      console.log(`Compressed PDF: ${origSize} -> ${newStats.size} bytes (${reduction}% reduction)`);
 
       return { success: true, data: outputPath };
     } catch (error) {
-      await unlink(scriptPath).catch(() => {});
-      const errMsg = error instanceof Error ? error.message : 'Unknown error';
-      const isPythonMissing = errMsg.includes('ENOENT') || errMsg.includes('not found');
-
       return {
         success: false,
         error: {
           code: ErrorCode.PDF_COMPRESS_FAILED,
-          message: isPythonMissing
-            ? 'Python is not installed or not in PATH. Please install Python 3.'
-            : 'Failed to compress PDF. Ensure pypdf is installed.',
-          detail: errMsg,
+          message: 'Failed to compress PDF',
+          detail: error instanceof Error ? error.message : 'Unknown error',
           recoverable: true,
         },
       };
     }
+  }
+
+  private async rewritePdf(filePath: string, outputPath: string): Promise<void> {
+    const pdfBytes = await readFile(filePath);
+    const pdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const compressedBytes = await pdf.save({ useObjectStreams: true });
+    await writeFile(outputPath, compressedBytes);
+  }
+
+  private async rasterCompressPdf(
+    filePath: string,
+    outputPath: string,
+    targetSize: number,
+    originalSize: number
+  ): Promise<void> {
+    const ratio = originalSize > 0 ? targetSize / originalSize : 0.5;
+    const initial = ratio >= 0.75
+      ? { scale: 1.6, quality: 0.82 }
+      : ratio >= 0.5
+      ? { scale: 1.35, quality: 0.7 }
+      : ratio >= 0.3
+      ? { scale: 1.1, quality: 0.58 }
+      : { scale: 0.9, quality: 0.45 };
+
+    let bestBytes: Uint8Array | null = null;
+    let bestSize = Number.POSITIVE_INFINITY;
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const scale = Math.max(0.5, initial.scale - attempt * 0.2);
+      const quality = Math.max(0.28, initial.quality - attempt * 0.11);
+      const pdfBytes = await this.renderPdfAsJpegPdf(filePath, scale, quality);
+      const size = pdfBytes.length;
+
+      if (size < bestSize) {
+        bestBytes = pdfBytes;
+        bestSize = size;
+      }
+
+      if (size <= targetSize) {
+        await writeFile(outputPath, pdfBytes);
+        return;
+      }
+    }
+
+    if (!bestBytes) {
+      throw new Error('No compressed PDF data was produced');
+    }
+
+    await writeFile(outputPath, bestBytes);
+  }
+
+  private async renderPdfAsJpegPdf(
+    filePath: string,
+    scale: number,
+    quality: number
+  ): Promise<Uint8Array> {
+    const pdfBuffer = await readFile(filePath);
+    const loadingTask = pdfjs.getDocument({ data: new Uint8Array(pdfBuffer) });
+    const sourcePdf = await loadingTask.promise;
+    const outputPdf = await PDFDocument.create();
+
+    for (let p = 1; p <= sourcePdf.numPages; p++) {
+      const sourcePage = await sourcePdf.getPage(p);
+      const pageViewport = sourcePage.getViewport({ scale: 1 });
+      const renderViewport = sourcePage.getViewport({ scale });
+      const canvas = createCanvas(renderViewport.width, renderViewport.height);
+      const context = canvas.getContext('2d');
+
+      await sourcePage.render({
+        canvasContext: context as unknown as CanvasRenderingContext2D,
+        viewport: renderViewport,
+      }).promise;
+
+      const jpegBuffer = canvas.toBuffer('image/jpeg', { quality });
+      const image = await outputPdf.embedJpg(jpegBuffer);
+      const outputPage = outputPdf.addPage([pageViewport.width, pageViewport.height]);
+      outputPage.drawImage(image, {
+        x: 0,
+        y: 0,
+        width: pageViewport.width,
+        height: pageViewport.height,
+      });
+    }
+
+    return outputPdf.save({ useObjectStreams: true });
   }
 
   /**
@@ -343,7 +348,7 @@ if __name__ == '__main__':
         const context = canvas.getContext('2d');
 
         const renderContext = {
-          canvasContext: context as any,
+          canvasContext: context as unknown as CanvasRenderingContext2D,
           viewport: viewport,
         };
 
@@ -514,7 +519,7 @@ except Exception as e:
       const pageCount = originalPdf.getPageCount();
 
       const points = [...new Set(splitPoints)]
-        .filter((p) => p > 0 && p < pageCount)
+        .filter((p) => p > 1 && p <= pageCount)
         .sort((a, b) => a - b);
 
       if (points.length === 0) {
@@ -522,7 +527,7 @@ except Exception as e:
           success: false,
           error: {
             code: ErrorCode.PDF_SPLIT_FAILED,
-            message: 'No valid split points provided. Page numbers must be between 1 and ' + (pageCount - 1),
+            message: 'No valid split points provided. Page numbers must be between 2 and ' + pageCount,
             recoverable: false,
           },
         };
@@ -532,7 +537,7 @@ except Exception as e:
       const ext = extname(filePath);
       const base = basename(filePath, ext);
 
-      const allPoints = [...points, pageCount]; // include end sentinel
+      const allPoints = [...points.map((point) => point - 1), pageCount]; // zero-based exclusive boundaries
       const outputPaths: string[] = [];
       let startIdx = 0;
 

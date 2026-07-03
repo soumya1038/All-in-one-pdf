@@ -28,8 +28,8 @@ function HomeScreen() {
   const handleBrowseClick = async () => {
     try {
       let properties: ('openFile' | 'multiSelections')[] = ['openFile', 'multiSelections'];
-      let extensions = ['pdf', 'jpg', 'jpeg', 'png', 'bmp', 'tiff', 'tif', 'webp', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'txt'];
-      let name = 'Documents';
+      let extensions = ['pdf', 'jpg', 'jpeg', 'png', 'bmp', 'tiff', 'tif', 'webp'];
+      let name = 'PDF and Image Files';
 
       if (activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.SPLIT || activeWorkflow === WorkflowType.PROTECT) {
         properties = ['openFile'];

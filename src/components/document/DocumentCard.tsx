@@ -1,4 +1,5 @@
 import { FileText, Trash2, GripVertical, File } from 'lucide-react';
+import { HTMLAttributes } from 'react';
 import { DocumentItem } from '../../types/Document.types';
 import { formatFileSize } from '../../utils/formatFileSize';
 
@@ -7,7 +8,7 @@ export interface DocumentCardProps {
   onPreview?: () => void;
   onDelete?: () => void;
   isDragging?: boolean;
-  dragHandleProps?: any;
+  dragHandleProps?: HTMLAttributes<HTMLDivElement>;
 }
 
 /**

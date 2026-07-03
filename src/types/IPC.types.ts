@@ -197,7 +197,7 @@ export interface IpcApi {
   clearTemp: () => Promise<Result<void>>;
   openFile: (filePath: string) => Promise<Result<void>>;
   openFolder: (filePath: string) => Promise<Result<void>>;
-  showOpenDialog: (options?: any) => Promise<Result<string[]>>;
+  showOpenDialog: (options?: unknown) => Promise<Result<string[]>>;
   printDocument: (documentId: string) => Promise<Result<void>>;
   showConfirmDialog: (message: string, title?: string) => Promise<boolean>;
 

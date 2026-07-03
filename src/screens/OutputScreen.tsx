@@ -218,6 +218,11 @@ function OutputScreen() {
     // Calculate split points
     let splitPoints: number[] | undefined = undefined;
     if (activeWorkflow === WorkflowType.SPLIT) {
+      if (pageCount <= 1) {
+        toast.error('This PDF only has one page and cannot be split.');
+        return;
+      }
+
       if (splitMode === 'single') {
         splitPoints = Array.from({ length: pageCount - 1 }, (_, i) => i + 2);
       } else {
@@ -358,6 +363,7 @@ function OutputScreen() {
   const showDpi = [OutputFormat.JPEG, OutputFormat.PNG, OutputFormat.TIFF].includes(format) && activeWorkflow !== WorkflowType.COMPRESS_IMAGE;
   const showMergeOption = activeWorkflow === WorkflowType.NONE && documents.length > 1 && format === OutputFormat.PDF;
   const showProtectionSetting = activeWorkflow === WorkflowType.NONE && format === OutputFormat.PDF;
+  const canExportDocx = documents.length === 1 && documents[0]?.type === DocumentType.PDF && activeWorkflow !== WorkflowType.COMPRESS_IMAGE;
 
   return (
     <div className="h-full flex flex-col animate-fade-in">
@@ -483,7 +489,7 @@ function OutputScreen() {
                   <option value={OutputFormat.JPEG}>JPEG</option>
                   <option value={OutputFormat.PNG}>PNG</option>
                   <option value={OutputFormat.TIFF}>TIFF</option>
-                  <option value={OutputFormat.DOCX}>DOCX</option>
+                  {canExportDocx && <option value={OutputFormat.DOCX}>DOCX</option>}
                 </select>
               </div>
             )}
@@ -809,7 +815,7 @@ function OutputScreen() {
             <Button variant="secondary" onClick={handleBack}>
               Back
             </Button>
-            <Button variant="primary" onClick={handleProcess}>
+            <Button id="process-output-button" variant="primary" onClick={handleProcess}>
               Process & Save
             </Button>
           </div>

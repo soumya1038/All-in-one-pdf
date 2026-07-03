@@ -17,8 +17,8 @@ function AddMoreModal() {
   const handleUploadClick = async () => {
     try {
       let properties: ('openFile' | 'multiSelections')[] = ['openFile', 'multiSelections'];
-      let extensions = ['pdf', 'jpg', 'jpeg', 'png', 'bmp', 'tiff', 'tif', 'webp', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'txt'];
-      let name = 'Documents';
+      let extensions = ['pdf', 'jpg', 'jpeg', 'png', 'bmp', 'tiff', 'tif', 'webp'];
+      let name = 'PDF and Image Files';
 
       if (activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.SPLIT || activeWorkflow === WorkflowType.PROTECT) {
         properties = ['openFile'];
@@ -90,7 +90,7 @@ function AddMoreModal() {
             Upload Files
           </h3>
           <p className="text-sm text-text-secondary mt-2 max-w-[200px]">
-            Add PDF, Office docs, or images from your computer
+            Add PDF or image files from your computer
           </p>
         </button>
 

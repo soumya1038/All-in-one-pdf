@@ -46,7 +46,7 @@ protocol.registerSchemesAsPrivileged([
  */
 app.whenReady().then(() => {
   // Register custom protocol for serving local files
-  protocol.registerFileProtocol('docuflow', (request: any, callback: any) => {
+  protocol.registerFileProtocol('docuflow', (request, callback) => {
     let urlPath = request.url.replace('docuflow://', '');
     // Strip query parameters and hash fragments
     const queryIndex = urlPath.indexOf('?');
@@ -107,7 +107,7 @@ app.on('activate', () => {
  */
 app.on('before-quit', async (event) => {
   event.preventDefault();
-  await cleanupTempDir();
+  await cleanupTempDir(false);
   app.exit(0);
 });
 

@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import { stat } from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
-import { ScannerDevice, ScanSettings, ScanResult, ScanColorMode } from '../../../src/types/Scanner.types';
+import { ScannerDevice, ScanSettings, ScanResult, ScanColorMode, ScanPaperSize } from '../../../src/types/Scanner.types';
 import { getTempFilePath } from '../utils/tempDir';
 import sharp from 'sharp';
 sharp.cache(false);
@@ -97,6 +97,19 @@ export class ScannerService {
       let intent = 1;
       if (settings.colorMode === ScanColorMode.GRAYSCALE) intent = 2;
       if (settings.colorMode === ScanColorMode.BLACK_AND_WHITE) intent = 4;
+      const paperDimensions = this.getPaperDimensions(settings.paperSize, settings.resolution);
+      const paperSizeScript = paperDimensions
+        ? `
+        try {
+          $item.Properties.Item('6149').Value = 0
+          $item.Properties.Item('6150').Value = 0
+          $item.Properties.Item('6151').Value = ${paperDimensions.width}
+          $item.Properties.Item('6152').Value = ${paperDimensions.height}
+        } catch {
+          # Some scanner drivers do not expose scan-area properties.
+        }
+        `
+        : '';
 
       const script = `
         $ErrorActionPreference = 'Stop'
@@ -117,6 +130,7 @@ export class ScannerService {
         $item.Properties.Item('6146').Value = ${intent}
         $item.Properties.Item('6147').Value = ${settings.resolution}
         $item.Properties.Item('6148').Value = ${settings.resolution}
+        ${paperSizeScript}
         
         $image = $item.Transfer()
         
@@ -161,6 +175,31 @@ export class ScannerService {
           recoverable: true,
         },
       };
+    }
+  }
+
+  private getPaperDimensions(
+    paperSize: ScanPaperSize,
+    resolution: number
+  ): { width: number; height: number } | null {
+    switch (paperSize) {
+      case ScanPaperSize.A4:
+        return {
+          width: Math.round(8.27 * resolution),
+          height: Math.round(11.69 * resolution),
+        };
+      case ScanPaperSize.LETTER:
+        return {
+          width: Math.round(8.5 * resolution),
+          height: Math.round(11 * resolution),
+        };
+      case ScanPaperSize.LEGAL:
+        return {
+          width: Math.round(8.5 * resolution),
+          height: Math.round(14 * resolution),
+        };
+      case ScanPaperSize.AUTO:
+        return null;
     }
   }
 }

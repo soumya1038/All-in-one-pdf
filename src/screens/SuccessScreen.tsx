@@ -14,6 +14,8 @@ function SuccessScreen() {
   // Read actual output info from processingStatus (set by ProcessingScreen after IPC completes)
   const processingStatus = useAppStore((state) => state.processingStatus);
   const outputPath = processingStatus?.outputPath || '';
+  const outputPaths = processingStatus?.outputPaths || [];
+  const isFolderOutput = !!processingStatus?.isFolderOutput;
   const outputSize = processingStatus?.outputSize ?? 0;
 
   // Derive display filename from the real saved path
@@ -23,18 +25,18 @@ function SuccessScreen() {
 
   const handleOpenFile = async () => {
     if (!outputPath) {
-      toast.error('Output file path not available');
+      toast.error('Output path not available');
       return;
     }
     const result = await window.electron.openFile(outputPath);
     if (!result.success) {
-      toast.error('Failed to open file: ' + result.error.message);
+      toast.error(`Failed to open ${isFolderOutput ? 'folder' : 'file'}: ${result.error.message}`);
     }
   };
 
   const handleOpenFolder = async () => {
     if (!outputPath) {
-      toast.error('Output file path not available');
+      toast.error('Output path not available');
       return;
     }
     // Pass the full file path — system.handler will use showItemInFolder(filePath)
@@ -76,7 +78,9 @@ function SuccessScreen() {
           {/* File Info */}
           <div className="bg-bg-sunken rounded-md p-6 space-y-3 text-left">
             <div className="flex items-center justify-between gap-4">
-              <span className="text-sm text-text-secondary shrink-0">Output File</span>
+              <span className="text-sm text-text-secondary shrink-0">
+                {isFolderOutput ? 'Output Folder' : 'Output File'}
+              </span>
               <span className="text-sm font-medium text-text-primary font-mono truncate" title={outputFilename}>
                 {outputFilename}
               </span>
@@ -93,9 +97,19 @@ function SuccessScreen() {
                 {outputOptions.format}
               </span>
             </div>
+            {isFolderOutput && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-text-secondary">Files Created</span>
+                <span className="text-sm font-medium text-text-primary font-mono">
+                  {outputPaths.length}
+                </span>
+              </div>
+            )}
             {outputPath && (
               <div className="flex items-start justify-between gap-4 pt-2 border-t border-border">
-                <span className="text-sm text-text-secondary shrink-0">Location</span>
+                <span className="text-sm text-text-secondary shrink-0">
+                  {isFolderOutput ? 'Folder' : 'Location'}
+                </span>
                 <span
                   className="text-sm font-medium text-text-primary font-mono truncate text-right"
                   title={outputPath}
@@ -116,7 +130,7 @@ function SuccessScreen() {
               disabled={!outputPath}
             >
               <FileText size={20} />
-              Open File
+              {isFolderOutput ? 'Open Output Folder' : 'Open File'}
             </Button>
             <Button
               variant="secondary"

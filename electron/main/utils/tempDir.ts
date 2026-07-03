@@ -40,7 +40,7 @@ export function getTempDir(): string | null {
  * Cleanup temporary directory and all its contents
  * Called on app quit
  */
-export async function cleanupTempDir(): Promise<void> {
+export async function cleanupTempDir(reinitialize: boolean = true): Promise<void> {
   if (!sessionTempDir) {
     return;
   }
@@ -49,8 +49,10 @@ export async function cleanupTempDir(): Promise<void> {
     await rm(sessionTempDir, { recursive: true, force: true });
     console.log('Temp directory cleaned up:', sessionTempDir);
     sessionTempDir = null;
-    // Automatically re-initialize a new unique temp directory for subsequent uploads
-    await initTempDir();
+    if (reinitialize) {
+      // Automatically re-initialize a new unique temp directory for subsequent uploads.
+      await initTempDir();
+    }
   } catch (error) {
     console.error('Failed to cleanup temp directory:', error);
     // Don't throw - cleanup is best-effort

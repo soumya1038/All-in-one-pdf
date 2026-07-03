@@ -41,7 +41,7 @@ export async function generatePdfThumbnail(
 
     // Render PDF page to canvas
     const renderContext = {
-      canvasContext: context as any,
+      canvasContext: context as unknown as CanvasRenderingContext2D,
       viewport: scaledViewport,
     };
 

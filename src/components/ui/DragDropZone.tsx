@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Upload, FileText, Image, FileSpreadsheet } from 'lucide-react';
+import { Upload, FileText, Image } from 'lucide-react';
 import { ACCEPTED_EXTENSIONS } from '../../constants/ACCEPTED_TYPES';
 
 export interface DragDropZoneProps {
@@ -109,6 +109,7 @@ function DragDropZone({
 
   return (
     <div
+      id="upload-drop-zone"
       className={`
         relative border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all duration-normal
         ${isDragging ? 'border-accent bg-accent-light' : 'border-border bg-bg-surface hover:border-accent/50 hover:bg-bg-sunken'}
@@ -152,10 +153,9 @@ function DragDropZone({
         <div className="flex items-center gap-2 text-text-muted">
           <FileText size={16} />
           <Image size={16} />
-          <FileSpreadsheet size={16} />
         </div>
         <p className="text-xs text-text-muted">
-          PDF, Images, Word, Excel, PowerPoint, Text
+          PDF and image files
         </p>
       </div>
     </div>

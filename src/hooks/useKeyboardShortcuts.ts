@@ -38,7 +38,7 @@ export function useKeyboardShortcuts() {
       if (e.ctrlKey && !e.shiftKey && e.key === 'o') {
         e.preventDefault();
         if (currentView === AppView.HOME) {
-          document.getElementById('file-input')?.click();
+          document.getElementById('upload-drop-zone')?.click();
         }
         return;
       }
@@ -150,7 +150,7 @@ export function useKeyboardShortcuts() {
       if (e.ctrlKey && !e.shiftKey && e.key === 's') {
         e.preventDefault();
         if (currentView === AppView.OUTPUT_OPTIONS) {
-          useAppStore.getState().setView(AppView.PROCESSING);
+          document.getElementById('process-output-button')?.click();
         }
         return;
       }

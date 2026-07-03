@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
-import { AppView } from '../types/UI.types';
+import { AppView, WorkflowType } from '../types/UI.types';
 import { ProcessingStep } from '../types/Output.types';
 import ProgressBar from '../components/ui/ProgressBar';
 import Button from '../components/ui/Button';
@@ -66,6 +66,8 @@ function ProcessingScreen() {
             totalFiles: documents.length,
             processedFiles: documents.length,
             outputPath: result.data.outputPath,
+            outputPaths: result.data.outputPaths,
+            isFolderOutput: result.data.isFolderOutput,
             outputSize: result.data.outputSize,
           });
 
@@ -76,11 +78,7 @@ function ProcessingScreen() {
               filename,
               path: result.data.outputPath,
               timestamp: Date.now(),
-              operation: outputOptions.mergeAsSingle ? 'merge'
-                : (outputOptions.compress || outputOptions.targetSize) ? 'compress'
-                : outputOptions.protection?.enabled ? 'protect'
-                : outputOptions.splitPoints?.length ? 'split'
-                : 'convert',
+              operation: getOperationLabel(),
             });
           } catch {
             // Non-critical
@@ -105,6 +103,21 @@ function ProcessingScreen() {
     processDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const getOperationLabel = () => {
+    if (outputOptions.workflow === WorkflowType.SPLIT || outputOptions.splitPoints?.length) return 'split';
+    if (outputOptions.workflow === WorkflowType.PROTECT || outputOptions.protection?.enabled) return 'protect';
+    if (
+      outputOptions.workflow === WorkflowType.COMPRESS ||
+      outputOptions.workflow === WorkflowType.COMPRESS_IMAGE ||
+      outputOptions.compress ||
+      outputOptions.targetSize
+    ) {
+      return 'compress';
+    }
+    if (outputOptions.workflow === WorkflowType.MERGE || outputOptions.mergeAsSingle) return 'merge';
+    return 'convert';
+  };
 
   const handleCancel = () => setView(AppView.OUTPUT_OPTIONS);
 

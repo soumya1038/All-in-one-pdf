@@ -13,7 +13,7 @@
     "preview": "electron-vite preview",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "lint": "eslint . --ext .ts,.tsx",
+    "lint": "eslint src electron --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "typecheck": "tsc --noEmit"
   },
@@ -61,12 +61,6 @@
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "msi",
           "arch": [
             "x64"
           ]

@@ -13,15 +13,6 @@ export const ACCEPTED_TYPES = {
   '.tiff': 'image/tiff',
   '.tif': 'image/tiff',
   '.webp': 'image/webp',
-  
-  // Documents
-  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  '.doc': 'application/msword',
-  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  '.xls': 'application/vnd.ms-excel',
-  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  '.ppt': 'application/vnd.ms-powerpoint',
-  '.txt': 'text/plain',
 } as const;
 
 /**
@@ -51,11 +42,4 @@ export const FILE_TYPE_MAP = {
   tiff: 'IMAGE',
   tif: 'IMAGE',
   webp: 'IMAGE',
-  docx: 'WORD',
-  doc: 'WORD',
-  xlsx: 'EXCEL',
-  xls: 'EXCEL',
-  pptx: 'POWERPOINT',
-  ppt: 'POWERPOINT',
-  txt: 'TEXT',
 } as const;

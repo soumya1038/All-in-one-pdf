@@ -12,8 +12,11 @@ import ScannerModal from './components/scanner/ScannerModal';
 import DocumentPreviewModal from './components/document/DocumentPreviewModal';
 import AddMoreModal from './components/document/AddMoreModal';
 import InAppConfirmModal from './components/ui/InAppConfirmModal';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
 function App() {
+  useKeyboardShortcuts();
+
   const currentView = useAppStore((state) => state.ui.currentView);
 
   const renderScreen = () => {

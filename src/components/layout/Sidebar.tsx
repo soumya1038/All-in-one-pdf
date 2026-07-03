@@ -48,7 +48,7 @@ function Sidebar() {
 
     // Documents already loaded — validate and proceed
     switch (workflow) {
-      case WorkflowType.COMPRESS_IMAGE:
+      case WorkflowType.COMPRESS_IMAGE: {
         if (documents.length !== 1 || documents[0].type === 'PDF') {
           toast.error('Compress Image requires exactly one image. Remove others/PDFs first.');
           return;
@@ -63,8 +63,9 @@ function Sidebar() {
         updateOutputOptions({ format: defaultFormat, compress: true, filename: `${imgBase}_compressed` });
         setView(AppView.OUTPUT_OPTIONS);
         break;
+      }
 
-      case WorkflowType.COMPRESS:
+      case WorkflowType.COMPRESS: {
         if (documents.length !== 1 || documents[0].type !== 'PDF') {
           toast.error('Compress requires exactly one PDF document. Clear others first.');
           return;
@@ -74,6 +75,7 @@ function Sidebar() {
         updateOutputOptions({ format: OutputFormat.PDF, compress: true, filename: `${compBase}_compressed` });
         setView(AppView.OUTPUT_OPTIONS);
         break;
+      }
 
       case WorkflowType.MERGE:
         if (!documents.every(d => d.type === 'PDF')) {

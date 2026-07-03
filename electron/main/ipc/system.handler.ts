@@ -158,9 +158,10 @@ export function registerSystemHandlers(): void {
   /**
    * Show native open-file dialog
    */
-  ipcMain.handle(IpcChannel.SYSTEM_SHOW_OPEN_DIALOG, async (_, options) => {
+  ipcMain.handle(IpcChannel.SYSTEM_SHOW_OPEN_DIALOG, async (_, options: unknown) => {
     try {
-      const result = await dialog.showOpenDialog(options || {
+      const dialogOptions = options as Electron.OpenDialogOptions | undefined;
+      const result = await dialog.showOpenDialog(dialogOptions || {
         properties: ['openFile', 'multiSelections'],
       });
       if (result.canceled) return { success: true, data: [] };
@@ -240,7 +241,13 @@ export function registerSystemHandlers(): void {
       printWindow = null;
       return { success: true, data: undefined };
     } catch (error) {
-      if (printWindow) { try { printWindow.close(); } catch {} }
+      if (printWindow) {
+        try {
+          printWindow.close();
+        } catch {
+          // The hidden print window may already be disposed.
+        }
+      }
       return {
         success: false,
         error: {

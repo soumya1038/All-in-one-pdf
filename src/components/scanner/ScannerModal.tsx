@@ -201,7 +201,7 @@ function ScannerModal() {
         {/* Instructions */}
         <div className="p-4 bg-accent-light rounded-md">
           <p className="text-sm text-text-secondary">
-            📄 Place your document on the scanner bed and click "Scan" to begin.
+            📄 Place your document on the scanner bed and click Scan to begin.
           </p>
         </div>
       </div>
