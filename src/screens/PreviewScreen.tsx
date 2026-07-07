@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { 
-  ArrowLeft, Printer, Crop, Sparkles, 
+import {
+  ArrowLeft, Printer, Crop, Sparkles,
   RotateCcw, Sliders, Check, ShieldAlert, X,
   AlertCircle, Upload, XCircle, ChevronLeft, ChevronRight
 } from 'lucide-react';
@@ -181,7 +181,7 @@ function PreviewScreen() {
   const [isDrawingSig, setIsDrawingSig] = useState(false);
   const [placedSignatures, setPlacedSignatures] = useState<PlacedSignature[]>([]);
   const [showSigInstructions, setShowSigInstructions] = useState(false);
-  
+
   // Typed signature states
   const [signatureMode, setSignatureMode] = useState<'draw' | 'type' | 'upload'>('draw');
   const [sigTypeName, setSigTypeName] = useState('');
@@ -323,7 +323,7 @@ function PreviewScreen() {
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i], g = data[i + 1], b = data[i + 2];
         const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-        
+
         let target = gray;
         if (gray > 160) {
           target = Math.min(255, gray * 1.25); // Bleach backgrounds
@@ -332,7 +332,7 @@ function PreviewScreen() {
         } else {
           target = (gray - 80) * 1.5 + 40; // High contrast midtones
         }
-        
+
         data[i] = target;
         data[i + 1] = target;
         data[i + 2] = target;
@@ -392,7 +392,7 @@ function PreviewScreen() {
     canvas.width = dstWidth;
     canvas.height = dstHeight;
     warpPerspective(tempCanvas, canvas, matrix, dstWidth, dstHeight);
-    
+
     // Reset selection handles
     setCropBox({
       tl: { x: 5, y: 5 },
@@ -419,10 +419,11 @@ function PreviewScreen() {
     const px = (pctX / 100) * canvas.width;
     const py = (pctY / 100) * canvas.height;
 
-    // Zoom parameters: crop a 400x400 square around handle and draw to 180x180 loupe (2x less zoom)
-    const srcSize = 400;
+    // Magnified zoom parameters: crop a 40x40 square around handle and stretch to 180x180 loupe (4.5x zoom)
+    const srcSize = 40;
     const destSize = 180;
 
+    // Draw the zoomed image onto the loupe canvas
     ctx.drawImage(
       canvas,
       px - srcSize / 2,
@@ -435,21 +436,16 @@ function PreviewScreen() {
       destSize
     );
 
-    // Draw central target crosshair
-    ctx.strokeStyle = '#EF4444'; // red-500
-    ctx.lineWidth = 1.5;
-
-    // Draw target circle outline in center (90, 90)
+    // Draw 90-degree crossing target lines (crosshairs) crossing the center (90, 90)
+    ctx.strokeStyle = '#EF4444'; // Solid Red crosshair lines
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(90, 90, 8, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Draw target crosslines
-    ctx.beginPath();
-    ctx.moveTo(90, 0); ctx.lineTo(90, 75);
-    ctx.moveTo(90, 105); ctx.lineTo(90, 180);
-    ctx.moveTo(0, 90); ctx.lineTo(75, 90);
-    ctx.moveTo(105, 90); ctx.lineTo(180, 90);
+    // Vertical line
+    ctx.moveTo(90, 0);
+    ctx.lineTo(90, 180);
+    // Horizontal line
+    ctx.moveTo(0, 90);
+    ctx.lineTo(180, 90);
     ctx.stroke();
   };
 
@@ -631,32 +627,32 @@ function PreviewScreen() {
     tempCanvas.height = 200;
     const ctx = tempCanvas.getContext('2d');
     if (!ctx) return '';
-    
+
     // Clear canvas
     ctx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-    
+
     ctx.fillStyle = '#0f172a';
     ctx.textBaseline = 'middle';
-    
+
     if (text.length > 1) {
       const firstChar = text.charAt(0);
       const restText = text.substring(1);
-      
+
       const firstFontSpec = `italic 46px "${initialFont}", cursive`;
       const restFontSpec = `italic 40px "${sigFont}", cursive`;
-      
+
       ctx.font = firstFontSpec;
       const firstWidth = ctx.measureText(firstChar).width;
       ctx.font = restFontSpec;
       const restWidth = ctx.measureText(restText).width;
-      
+
       const totalWidth = firstWidth + restWidth;
       const startX = (tempCanvas.width - totalWidth) / 2;
-      
+
       ctx.font = firstFontSpec;
       ctx.textAlign = 'left';
       ctx.fillText(firstChar, startX, tempCanvas.height / 2);
-      
+
       ctx.font = restFontSpec;
       ctx.fillText(restText, startX + firstWidth, tempCanvas.height / 2);
     } else {
@@ -664,7 +660,7 @@ function PreviewScreen() {
       ctx.textAlign = 'center';
       ctx.fillText(text, tempCanvas.width / 2, tempCanvas.height / 2);
     }
-    
+
     const trimmed = trimCanvas(tempCanvas);
     return trimmed.toDataURL('image/png');
   };
@@ -803,7 +799,7 @@ function PreviewScreen() {
     );
     if (!confirmed) return;
 
-    await window.electron.clearTemp().catch(() => {});
+    await window.electron.clearTemp().catch(() => { });
     clearDocuments();
     toast.success('Session cancelled');
     setView(AppView.HOME);
@@ -838,10 +834,10 @@ function PreviewScreen() {
         prev.map((sig) =>
           sig.id === sigId
             ? {
-                ...sig,
-                x: Math.max(-sig.width + 1, Math.min(100 - 1, sig.x + deltaX)),
-                y: Math.max(-sig.height + 1, Math.min(100 - 1, sig.y + deltaY))
-              }
+              ...sig,
+              x: Math.max(-sig.width + 1, Math.min(100 - 1, sig.x + deltaX)),
+              y: Math.max(-sig.height + 1, Math.min(100 - 1, sig.y + deltaY))
+            }
             : sig
         )
       );
@@ -851,17 +847,17 @@ function PreviewScreen() {
         prev.map((sig) =>
           sig.id === sigId
             ? {
-                ...sig,
-                width: Math.max(2, sig.width + deltaX),
-                height: Math.max(1, sig.height + deltaY)
-              }
+              ...sig,
+              width: Math.max(2, sig.width + deltaX),
+              height: Math.max(1, sig.height + deltaY)
+            }
             : sig
         )
       );
     } else if (['tl', 'tr', 'bl', 'br'].includes(dragType)) {
       const newX = Math.max(0, Math.min(100, ((e.clientX - containerRect.left) / containerRect.width) * 100));
       const newY = Math.max(0, Math.min(100, ((e.clientY - containerRect.top) / containerRect.height) * 100));
-      
+
       setCropBox((prev) => {
         const updated = {
           ...prev,
@@ -940,7 +936,7 @@ function PreviewScreen() {
   }
 
   return (
-    <div 
+    <div
       className="h-full flex flex-col animate-fade-in bg-bg-base overflow-hidden"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -969,18 +965,18 @@ function PreviewScreen() {
           <div className="flex items-center gap-2">
             {!isEditing ? (
               <>
-                <Button 
-                  variant="secondary" 
-                  size="sm" 
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setIsEditing(true)}
                   disabled={isProcessing || isPrinting}
                 >
                   <Crop size={16} className="mr-1.5" />
                   Edit Document
                 </Button>
-                <Button 
-                  variant="primary" 
-                  size="sm" 
+                <Button
+                  variant="primary"
+                  size="sm"
                   onClick={handlePrint}
                   disabled={isProcessing || isPrinting}
                 >
@@ -1022,137 +1018,139 @@ function PreviewScreen() {
               )
             ) : (
               // Active Editor Workspace
-              <div 
-                ref={containerRef}
+              <div
                 className="relative max-w-full max-h-[90%] flex items-center justify-center border border-border bg-bg-sunken p-2 rounded"
               >
-                <canvas 
-                  ref={canvasRef} 
-                  className="max-w-full max-h-[500px] object-contain rounded shadow-md bg-white"
-                />
-                
-                {/* Perspective Crop Handles */}
-                {activeTab === EditTab.CROP && (
-                  <div className="absolute inset-0 w-full h-full">
-                    {/* SVG Connector lines (Using viewBox for perfect pixel percentage scaling) */}
-                    <svg 
-                      className="absolute inset-0 w-full h-full z-10" 
-                      viewBox="0 0 100 100" 
-                      preserveAspectRatio="none"
-                      style={{ pointerEvents: 'none' }}
-                    >
-                      <polygon
-                        points={`${cropBox.tl.x},${cropBox.tl.y} ${cropBox.tr.x},${cropBox.tr.y} ${cropBox.br.x},${cropBox.br.y} ${cropBox.bl.x},${cropBox.bl.y}`}
-                        className="stroke-accent stroke-[0.4] fill-accent/10 pointer-events-none"
-                      />
-                      {/* Top Edge (tl to tr) */}
-                      <line
-                        x1={cropBox.tl.x}
-                        y1={cropBox.tl.y}
-                        x2={cropBox.tr.x}
-                        y2={cropBox.tr.y}
-                        className="stroke-accent/0 hover:stroke-accent/40 cursor-move transition-colors duration-normal"
-                        strokeWidth="3"
-                        style={{ pointerEvents: 'auto' }}
-                        onMouseDown={(e) => handleMouseDown(e, 'edge-top')}
-                      />
-                      {/* Right Edge (tr to br) */}
-                      <line
-                        x1={cropBox.tr.x}
-                        y1={cropBox.tr.y}
-                        x2={cropBox.br.x}
-                        y2={cropBox.br.y}
-                        className="stroke-accent/0 hover:stroke-accent/40 cursor-move transition-colors duration-normal"
-                        strokeWidth="3"
-                        style={{ pointerEvents: 'auto' }}
-                        onMouseDown={(e) => handleMouseDown(e, 'edge-right')}
-                      />
-                      {/* Bottom Edge (bl to br) */}
-                      <line
-                        x1={cropBox.bl.x}
-                        y1={cropBox.bl.y}
-                        x2={cropBox.br.x}
-                        y2={cropBox.br.y}
-                        className="stroke-accent/0 hover:stroke-accent/40 cursor-move transition-colors duration-normal"
-                        strokeWidth="3"
-                        style={{ pointerEvents: 'auto' }}
-                        onMouseDown={(e) => handleMouseDown(e, 'edge-bottom')}
-                      />
-                      {/* Left Edge (tl to bl) */}
-                      <line
-                        x1={cropBox.tl.x}
-                        y1={cropBox.tl.y}
-                        x2={cropBox.bl.x}
-                        y2={cropBox.bl.y}
-                        className="stroke-accent/0 hover:stroke-accent/40 cursor-move transition-colors duration-normal"
-                        strokeWidth="3"
-                        style={{ pointerEvents: 'auto' }}
-                        onMouseDown={(e) => handleMouseDown(e, 'edge-left')}
-                      />
-                    </svg>
-                    
-                    {/* Draggable Corner Handles */}
-                    <div 
-                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
-                      style={{ left: `${cropBox.tl.x}%`, top: `${cropBox.tl.y}%` }}
-                      onMouseDown={(e) => handleMouseDown(e, 'tl')}
-                    />
-                    <div 
-                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
-                      style={{ left: `${cropBox.tr.x}%`, top: `${cropBox.tr.y}%` }}
-                      onMouseDown={(e) => handleMouseDown(e, 'tr')}
-                    />
-                    <div 
-                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
-                      style={{ left: `${cropBox.bl.x}%`, top: `${cropBox.bl.y}%` }}
-                      onMouseDown={(e) => handleMouseDown(e, 'bl')}
-                    />
-                    <div 
-                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
-                      style={{ left: `${cropBox.br.x}%`, top: `${cropBox.br.y}%` }}
-                      onMouseDown={(e) => handleMouseDown(e, 'br')}
-                    />
-                  </div>
-                )}
+                <div
+                  ref={containerRef}
+                  className="relative select-none"
+                >
+                  <canvas
+                    ref={canvasRef}
+                    className="max-w-full max-h-[500px] object-contain rounded shadow-md bg-white"
+                  />
 
+                  {/* Perspective Crop Handles */}
+                  {activeTab === EditTab.CROP && (
+                    <div className="absolute inset-0 w-full h-full">
+                      {/* SVG Connector lines (Using viewBox for perfect pixel percentage scaling) */}
+                      <svg
+                        className="absolute inset-0 w-full h-full z-10"
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        <polygon
+                          points={`${cropBox.tl.x},${cropBox.tl.y} ${cropBox.tr.x},${cropBox.tr.y} ${cropBox.br.x},${cropBox.br.y} ${cropBox.bl.x},${cropBox.bl.y}`}
+                          className="stroke-accent stroke-[0.4] fill-accent/10 pointer-events-none"
+                        />
+                        {/* Top Edge (tl to tr) */}
+                        <line
+                          x1={cropBox.tl.x}
+                          y1={cropBox.tl.y}
+                          x2={cropBox.tr.x}
+                          y2={cropBox.tr.y}
+                          className="stroke-accent/0 hover:stroke-accent/40 cursor-move transition-colors duration-normal"
+                          strokeWidth="3"
+                          style={{ pointerEvents: 'auto' }}
+                          onMouseDown={(e) => handleMouseDown(e, 'edge-top')}
+                        />
+                        {/* Right Edge (tr to br) */}
+                        <line
+                          x1={cropBox.tr.x}
+                          y1={cropBox.tr.y}
+                          x2={cropBox.br.x}
+                          y2={cropBox.br.y}
+                          className="stroke-accent/0 hover:stroke-accent/40 cursor-move transition-colors duration-normal"
+                          strokeWidth="3"
+                          style={{ pointerEvents: 'auto' }}
+                          onMouseDown={(e) => handleMouseDown(e, 'edge-right')}
+                        />
+                        {/* Bottom Edge (bl to br) */}
+                        <line
+                          x1={cropBox.bl.x}
+                          y1={cropBox.bl.y}
+                          x2={cropBox.br.x}
+                          y2={cropBox.br.y}
+                          className="stroke-accent/0 hover:stroke-accent/40 cursor-move transition-colors duration-normal"
+                          strokeWidth="3"
+                          style={{ pointerEvents: 'auto' }}
+                          onMouseDown={(e) => handleMouseDown(e, 'edge-bottom')}
+                        />
+                        {/* Left Edge (tl to bl) */}
+                        <line
+                          x1={cropBox.tl.x}
+                          y1={cropBox.tl.y}
+                          x2={cropBox.bl.x}
+                          y2={cropBox.bl.y}
+                          className="stroke-accent/0 hover:stroke-accent/40 cursor-move transition-colors duration-normal"
+                          strokeWidth="3"
+                          style={{ pointerEvents: 'auto' }}
+                          onMouseDown={(e) => handleMouseDown(e, 'edge-left')}
+                        />
+                      </svg>
 
+                      {/* Draggable Corner Handles */}
+                      <div
+                        className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
+                        style={{ left: `${cropBox.tl.x}%`, top: `${cropBox.tl.y}%` }}
+                        onMouseDown={(e) => handleMouseDown(e, 'tl')}
+                      />
+                      <div
+                        className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
+                        style={{ left: `${cropBox.tr.x}%`, top: `${cropBox.tr.y}%` }}
+                        onMouseDown={(e) => handleMouseDown(e, 'tr')}
+                      />
+                      <div
+                        className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
+                        style={{ left: `${cropBox.bl.x}%`, top: `${cropBox.bl.y}%` }}
+                        onMouseDown={(e) => handleMouseDown(e, 'bl')}
+                      />
+                      <div
+                        className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
+                        style={{ left: `${cropBox.br.x}%`, top: `${cropBox.br.y}%` }}
+                        onMouseDown={(e) => handleMouseDown(e, 'br')}
+                      />
+                    </div>
+                  )}
 
-                {/* Active Placed Signatures Overlays */}
-                {activeTab === EditTab.SIGNATURE && placedSignatures.map((sig) => (
-                  <div
-                    key={sig.id}
-                    className="absolute border border-dashed border-accent bg-accent/5 cursor-move z-10"
-                    style={{
-                      left: `${sig.x}%`,
-                      top: `${sig.y}%`,
-                      width: `${sig.width}%`,
-                      height: `${sig.height}%`,
-                    }}
-                    onMouseDown={(e) => handleMouseDown(e, `sigMove-${sig.id}`)}
-                  >
-                    <img
-                      src={sig.imgSrc}
-                      alt="Placed signature"
-                      className="w-full h-full object-contain pointer-events-none"
-                    />
-                    {/* Delete signature item */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPlacedSignatures((prev) => prev.filter((s) => s.id !== sig.id));
-                      }}
-                      className="absolute -top-2 -right-2 bg-error text-white rounded-full p-0.5 hover:bg-error-dark shadow z-20"
-                      title="Remove Signature"
-                    >
-                      <X size={12} />
-                    </button>
-                    {/* Resize handle */}
+                  {/* Active Placed Signatures Overlays */}
+                  {activeTab === EditTab.SIGNATURE && placedSignatures.map((sig) => (
                     <div
-                      className="absolute -bottom-1 -right-1 w-3 h-3 bg-accent border border-white cursor-se-resize z-20"
-                      onMouseDown={(e) => handleMouseDown(e, `sigResize-${sig.id}`)}
-                    />
-                  </div>
-                ))}
+                      key={sig.id}
+                      className="absolute border border-dashed border-accent bg-accent/5 cursor-move z-10"
+                      style={{
+                        left: `${sig.x}%`,
+                        top: `${sig.y}%`,
+                        width: `${sig.width}%`,
+                        height: `${sig.height}%`,
+                      }}
+                      onMouseDown={(e) => handleMouseDown(e, `sigMove-${sig.id}`)}
+                    >
+                      <img
+                        src={sig.imgSrc}
+                        alt="Placed signature"
+                        className="w-full h-full object-contain pointer-events-none"
+                      />
+                      {/* Delete signature item */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPlacedSignatures((prev) => prev.filter((s) => s.id !== sig.id));
+                        }}
+                        className="absolute -top-2 -right-2 bg-error text-white rounded-full p-0.5 hover:bg-error-dark shadow z-20"
+                        title="Remove Signature"
+                      >
+                        <X size={12} />
+                      </button>
+                      {/* Resize handle */}
+                      <div
+                        className="absolute -bottom-1 -right-1 w-3 h-3 bg-accent border border-white cursor-se-resize z-20"
+                        onMouseDown={(e) => handleMouseDown(e, `sigResize-${sig.id}`)}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -1215,32 +1213,32 @@ function PreviewScreen() {
               {activeTab === EditTab.FILTERS && (
                 <div className="flex flex-col gap-3 animate-fade-in">
                   <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Image Enhancements</span>
-                  <Button 
-                    variant="secondary" 
+                  <Button
+                    variant="secondary"
                     className="w-full justify-start text-sm py-2.5"
                     onClick={() => applyFilter('clean')}
                   >
                     <Sparkles size={16} className="mr-2 text-accent" />
                     Clean & De-noise
                   </Button>
-                  <Button 
-                    variant="secondary" 
+                  <Button
+                    variant="secondary"
                     className="w-full justify-start text-sm py-2.5"
                     onClick={() => applyFilter('grayscale')}
                   >
                     <Sliders size={16} className="mr-2 text-text-secondary" />
                     Convert to Grayscale
                   </Button>
-                  <Button 
-                    variant="secondary" 
+                  <Button
+                    variant="secondary"
                     className="w-full justify-start text-sm py-2.5"
                     onClick={() => applyFilter('binarize')}
                   >
                     <ShieldAlert size={16} className="mr-2 text-text-secondary" />
                     Crisp Black & White
                   </Button>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     className="w-full justify-start text-sm py-2"
                     onClick={resetCanvas}
                   >
@@ -1254,18 +1252,18 @@ function PreviewScreen() {
                 <div className="flex flex-col gap-4 animate-fade-in">
                   <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Perspective Crop</span>
                   <p className="text-xs text-text-secondary leading-relaxed">
-                    Drag the 4 corner handles individually to trace the borders of any paper. 
+                    Drag the 4 corner handles individually to trace the borders of any paper.
                     Applying the crop will deskew the shape into a clean, flat 90-degree rectangle.
                   </p>
-                  
+
                   {/* Zoom Loupe Preview Container inside control panel */}
                   <div className="border border-border rounded-lg bg-bg-sunken p-3 flex flex-col items-center justify-center gap-2">
                     <span className="text-[10px] font-semibold text-text-muted uppercase self-start">Zoom Loupe</span>
                     <div className="w-[180px] h-[180px] rounded-lg border border-border bg-white overflow-hidden relative flex justify-center items-center shadow-inner">
                       {dragType && ['tl', 'tr', 'bl', 'br'].includes(dragType) ? (
-                        <canvas 
-                          ref={loupeCanvasRef} 
-                          width={180} 
+                        <canvas
+                          ref={loupeCanvasRef}
+                          width={180}
                           height={180}
                           className="w-full h-full"
                         />
@@ -1277,16 +1275,16 @@ function PreviewScreen() {
                     </div>
                   </div>
 
-                  <Button 
-                    variant="primary" 
+                  <Button
+                    variant="primary"
                     className="w-full justify-center py-2.5"
                     onClick={executeCrop}
                   >
                     <Check size={16} className="mr-2" />
                     Apply Crop
                   </Button>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     className="w-full justify-start text-sm"
                     onClick={resetCanvas}
                   >
@@ -1603,16 +1601,16 @@ function PreviewScreen() {
 
             {/* Bottom Actions for Saving and Overwriting */}
             <div className="border-t border-border pt-4 flex flex-col gap-2 flex-shrink-0">
-              <Button 
-                variant="primary" 
+              <Button
+                variant="primary"
                 className="w-full justify-center py-3 bg-[#16A34A] hover:bg-[#15803D] text-white border-none font-semibold shadow-sm"
                 onClick={handleSaveEdit}
                 disabled={isProcessing}
               >
                 {isProcessing ? 'Saving Edits...' : 'Save & Overwrite'}
               </Button>
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 className="w-full justify-center py-2"
                 onClick={() => {
                   setIsEditing(false);
@@ -1623,8 +1621,8 @@ function PreviewScreen() {
               >
                 Cancel Edit
               </Button>
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 className="w-full justify-center py-2 text-text-secondary hover:text-text-primary"
                 onClick={() => {
                   setIsEditing(false);

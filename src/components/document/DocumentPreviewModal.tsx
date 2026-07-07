@@ -162,6 +162,17 @@ function DocumentPreviewModal() {
     br: { x: 90, y: 90 }
   });
 
+  // OpenCV corner detection state
+  const [cvStatus, setCvStatus] = useState<'unloaded' | 'loading' | 'loaded' | 'error'>('unloaded');
+  const [hasAutoDetected, setHasAutoDetected] = useState(false);
+
+  // Reset auto detect flag when editing ends
+  useEffect(() => {
+    if (!isEditing) {
+      setHasAutoDetected(false);
+    }
+  }, [isEditing]);
+
   // Signature pad states
   const sigCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawingSig, setIsDrawingSig] = useState(false);
@@ -202,6 +213,276 @@ function DocumentPreviewModal() {
     });
     setSignatureImage(null);
   };
+
+  // Load OpenCV helper script
+  const loadOpenCV = () => {
+    console.log('[Renderer] loadOpenCV called. Current cvStatus:', cvStatus, 'window.cv:', typeof window.cv);
+    
+    if (window.cv) {
+      if (window.cv.Mat) {
+        console.log('[Renderer] OpenCV is already loaded with cv.Mat available.');
+        setCvStatus('loaded');
+        return;
+      }
+      if (window.cv instanceof Promise) {
+        console.log('[Renderer] OpenCV is currently a Promise. Waiting for resolution...');
+        setCvStatus('loading');
+        window.cv.then((resolvedCv: any) => {
+          console.log('[Renderer] OpenCV Promise resolved successfully.');
+          window.cv = resolvedCv;
+          setCvStatus('loaded');
+        }).catch((err: any) => {
+          console.error('[Renderer] OpenCV Promise rejected:', err);
+          setCvStatus('error');
+        });
+        return;
+      }
+    }
+    
+    if (cvStatus === 'loading') return;
+
+    setCvStatus('loading');
+
+    window.Module = {
+      onRuntimeInitialized: () => {
+        console.log('[Renderer] window.Module.onRuntimeInitialized triggered successfully.');
+        setCvStatus('loaded');
+      }
+    };
+
+    const existingScript = document.getElementById('opencv-script');
+    if (existingScript) {
+      console.log('[Renderer] OpenCV script element already exists.');
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'opencv-script';
+    script.src = '/opencv.js';
+    script.async = true;
+    
+    script.onload = () => {
+      console.log('[Renderer] opencv.js script element onload triggered. window.cv:', typeof window.cv);
+      
+      if (window.cv) {
+        if (window.cv.Mat) {
+          console.log('[Renderer] Direct cv.Mat is available on script load.');
+          setCvStatus('loaded');
+        } else if (window.cv instanceof Promise) {
+          console.log('[Renderer] window.cv is a Promise. Resolving...');
+          window.cv.then((resolvedCv: any) => {
+            console.log('[Renderer] window.cv Promise resolved.');
+            window.cv = resolvedCv;
+            setCvStatus('loaded');
+          }).catch((err: any) => {
+            console.error('[Renderer] window.cv Promise failed to resolve:', err);
+            setCvStatus('error');
+          });
+        } else if (typeof window.cv === 'function') {
+          console.log('[Renderer] window.cv is a constructor function. Executing...');
+          try {
+            window.cv().then((resolvedCv: any) => {
+              console.log('[Renderer] window.cv constructor promise resolved.');
+              window.cv = resolvedCv;
+              setCvStatus('loaded');
+            }).catch((err: any) => {
+              console.error('[Renderer] window.cv constructor promise failed:', err);
+            });
+          } catch (e) {
+            console.log('[Renderer] window.cv constructor execution failed directly, waiting for Module.onRuntimeInitialized');
+          }
+        }
+      }
+    };
+    
+    script.onerror = (e) => {
+      console.error('[Renderer] Failed to load OpenCV script element:', e);
+      setCvStatus('error');
+      toast.error('Failed to load OpenCV helper for auto-crop');
+    };
+    
+    document.body.appendChild(script);
+  };
+
+  // Run OpenCV Canny Edge & Contour detection to find document corners
+  const detectDocumentCorners = () => {
+    console.log('[Renderer] detectDocumentCorners initiated. window.cv:', typeof window.cv);
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      console.warn('[Renderer] Canvas ref is empty in detectDocumentCorners');
+      return;
+    }
+    if (!window.cv) {
+      console.warn('[Renderer] window.cv is empty in detectDocumentCorners');
+      return;
+    }
+
+    const cv = window.cv;
+    console.log('[Renderer] Canvas dimensions:', canvas.width, 'x', canvas.height);
+
+    let src;
+    try {
+      src = cv.imread(canvas);
+      console.log('[Renderer] cv.imread successful. Shape:', src.rows, 'x', src.cols);
+    } catch (readErr) {
+      console.error('[Renderer] Error reading canvas via cv.imread:', readErr);
+      toast.error('Error reading image for detection.');
+      return;
+    }
+
+    let gray = new cv.Mat();
+    let blurred = new cv.Mat();
+    let edged = new cv.Mat();
+    let contours = new cv.MatVector();
+    let hierarchy = new cv.Mat();
+
+    try {
+      // 1. Convert to grayscale
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+
+      // 2. Blur to filter noise
+      cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+
+      // 3. Detect edges
+      cv.Canny(blurred, edged, 75, 200, 3);
+
+      // 4. Find contours
+      cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+      console.log('[Renderer] Number of contours detected:', contours.size());
+
+      const totalArea = canvas.width * canvas.height;
+      let maxArea = 0;
+      let approx = new cv.Mat();
+      let foundQuad = false;
+      let finalPoints: { x: number; y: number }[] = [];
+
+      // Pass 1: Try to find a perfect 4-sided polygon (quadrilateral)
+      for (let i = 0; i < contours.size(); ++i) {
+        let cnt = contours.get(i);
+        let area = cv.contourArea(cnt);
+
+        // Ignore contours that are basically the entire canvas border (>98% area)
+        if (area > 1000 && area < totalArea * 0.98 && area > maxArea) {
+          let peri = cv.arcLength(cnt, true);
+          let tempApprox = new cv.Mat();
+          cv.approxPolyDP(cnt, tempApprox, 0.02 * peri, true);
+
+          // Check if approximated polygon has 4 vertices (quadrilateral)
+          if (tempApprox.rows === 4) {
+            maxArea = area;
+            if (approx) approx.delete();
+            approx = tempApprox;
+            foundQuad = true;
+          } else {
+            tempApprox.delete();
+          }
+        }
+      }
+      console.log('[Renderer] Pass 1: foundQuad =', foundQuad, 'maxArea =', maxArea);
+
+      // Pass 2: Fallback - if no perfect 4-sided polygon found, find the largest contour and use its bounding box
+      if (!foundQuad) {
+        let largestContourIdx = -1;
+        let largestArea = 0;
+        for (let i = 0; i < contours.size(); ++i) {
+          let cnt = contours.get(i);
+          let area = cv.contourArea(cnt);
+          if (area > 1000 && area < totalArea * 0.98 && area > largestArea) {
+            largestArea = area;
+            largestContourIdx = i;
+          }
+        }
+        console.log('[Renderer] Pass 2: largestContourIdx =', largestContourIdx, 'largestArea =', largestArea);
+
+        if (largestContourIdx !== -1) {
+          let cnt = contours.get(largestContourIdx);
+          let rect = cv.boundingRect(cnt);
+          finalPoints = [
+            { x: rect.x, y: rect.y },
+            { x: rect.x + rect.width, y: rect.y },
+            { x: rect.x, y: rect.y + rect.height },
+            { x: rect.x + rect.width, y: rect.y + rect.height }
+          ];
+          foundQuad = true;
+          console.log('[Renderer] Pass 2: using bounding box of largest contour:', rect.x, rect.y, rect.width, rect.height);
+        }
+      } else if (approx && approx.rows === 4) {
+        for (let i = 0; i < 4; i++) {
+          const x = approx.data32S[i * 2];
+          const y = approx.data32S[i * 2 + 1];
+          finalPoints.push({ x, y });
+        }
+      }
+
+      if (foundQuad && finalPoints.length === 4) {
+        // Sort points: tl, tr, bl, br
+        const points = [...finalPoints];
+        const sums = points.map(p => p.x + p.y);
+        const diffs = points.map(p => p.x - p.y);
+
+        const tlIndex = sums.indexOf(Math.min(...sums));
+        const brIndex = sums.indexOf(Math.max(...sums));
+
+        const remainingIndices = [0, 1, 2, 3].filter(idx => idx !== tlIndex && idx !== brIndex);
+        let trIndex = remainingIndices[0];
+        let blIndex = remainingIndices[1];
+
+        if (diffs[trIndex] < diffs[blIndex]) {
+          const temp = trIndex;
+          trIndex = blIndex;
+          blIndex = temp;
+        }
+
+        const tl = points[tlIndex];
+        const tr = points[trIndex];
+        const bl = points[blIndex];
+        const br = points[brIndex];
+
+        // Convert coordinates to percentages of canvas size
+        const clamp = (val: number) => Math.max(0, Math.min(100, val));
+        const newBox = {
+          tl: { x: clamp((tl.x / canvas.width) * 100), y: clamp((tl.y / canvas.height) * 100) },
+          tr: { x: clamp((tr.x / canvas.width) * 100), y: clamp((tr.y / canvas.height) * 100) },
+          bl: { x: clamp((bl.x / canvas.width) * 100), y: clamp((bl.y / canvas.height) * 100) },
+          br: { x: clamp((br.x / canvas.width) * 100), y: clamp((br.y / canvas.height) * 100) }
+        };
+        console.log('[Renderer] Setting crop handles:', newBox);
+        setCropBox(newBox);
+
+        toast.success('Document detected automatically!');
+      } else {
+        console.log('[Renderer] No valid document shape or fallback bounding box was found.');
+        toast.error('Could not clearly detect document. Try manual adjustments.');
+      }
+
+      if (approx) approx.delete();
+    } catch (err) {
+      console.error('[Renderer] OpenCV error during corner detection:', err);
+      toast.error('Error during auto-corner detection.');
+    } finally {
+      src.delete();
+      gray.delete();
+      blurred.delete();
+      edged.delete();
+      contours.delete();
+      hierarchy.delete();
+    }
+  };
+
+  // Trigger OpenCV load when crop tab is selected and automatically run corner detection once loaded
+  useEffect(() => {
+    if (isOpen && isEditing && activeTab === EditTab.CROP) {
+      loadOpenCV();
+      if (cvStatus === 'loaded' && !hasAutoDetected) {
+        console.log('[Renderer] OpenCV loaded. Scheduling auto-detect corners in 100ms...');
+        const timer = setTimeout(() => {
+          detectDocumentCorners();
+          setHasAutoDetected(true);
+        }, 100);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isOpen, isEditing, activeTab, cvStatus, hasAutoDetected]);
 
   // Filter application
   const applyFilter = (filterType: 'grayscale' | 'binarize' | 'clean') => {
@@ -748,6 +1029,32 @@ function DocumentPreviewModal() {
                       <span className="text-xs font-semibold text-text-muted uppercase">Perspective Crop</span>
                       <p className="text-xs text-text-secondary">Drag the 4 corner handles individually to select any shape. After crop, the selected area will flatten into a 90-degree rectangle.</p>
                       
+                      {cvStatus === 'loaded' ? (
+                        <Button 
+                          variant="secondary" 
+                          className="w-full justify-center text-sm border-accent text-accent hover:bg-accent/5"
+                          onClick={detectDocumentCorners}
+                        >
+                          <Sparkles size={16} className="mr-2" />
+                          Auto Detect Corners
+                        </Button>
+                      ) : cvStatus === 'loading' ? (
+                        <div className="flex items-center justify-center gap-2 p-2 bg-bg-sunken border border-border rounded-md text-xs text-text-secondary">
+                          <span className="animate-spin h-3.5 w-3.5 border-2 border-accent border-t-transparent rounded-full" />
+                          Loading Auto-Crop helper...
+                        </div>
+                      ) : (
+                        <Button 
+                          variant="secondary" 
+                          className="w-full justify-center text-sm border-dashed text-text-secondary hover:bg-bg-sunken"
+                          onClick={loadOpenCV}
+                        >
+                          Enable Auto-Detect
+                        </Button>
+                      )}
+
+                      <div className="border-t border-border my-1" />
+
                       <Button 
                         variant="primary" 
                         className="w-full justify-center"

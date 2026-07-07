@@ -1,6 +1,6 @@
 {
   "name": "docuflow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Windows Document Management Desktop App",
   "main": "out/main/index.js",
   "author": "DocuFlow Team",
