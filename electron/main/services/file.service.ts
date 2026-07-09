@@ -350,6 +350,320 @@ export class FileService {
   }
 
   /**
+   * Delete a specific page from a PDF document
+   */
+  async deletePage(id: string, pageNumber: number): Promise<Result<DocumentItem>> {
+    try {
+      const document = FileService.documents.get(id);
+      if (!document) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.FILE_NOT_FOUND,
+            message: 'Document not found',
+            recoverable: false,
+          },
+        };
+      }
+
+      if (document.type !== DocumentType.PDF) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: 'Document is not a PDF',
+            recoverable: false,
+          },
+        };
+      }
+
+      if (document.pageCount <= 1) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: 'Cannot delete the only page in a PDF',
+            recoverable: false,
+          },
+        };
+      }
+
+      const oldTempPath = document.tempPath;
+      const oldThumbnailPath = document.thumbnailPath;
+
+      const { PDFDocument } = await import('pdf-lib');
+      const currentPdfBytes = await readFile(oldTempPath);
+      const pdfDoc = await PDFDocument.load(currentPdfBytes, { ignoreEncryption: true });
+
+      if (pageNumber < 1 || pageNumber > pdfDoc.getPageCount()) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: `Invalid page number: ${pageNumber}`,
+            recoverable: false,
+          },
+        };
+      }
+
+      pdfDoc.removePage(pageNumber - 1);
+
+      const pdfBytes = await pdfDoc.save();
+      const finalBuffer = Buffer.from(pdfBytes);
+
+      const newId = uuidv4();
+      const sanitized = sanitizeFilename(basename(document.filename));
+      const newTempPath = getTempFilePath(`${newId}_${sanitized}`);
+
+      await writeFile(newTempPath, finalBuffer);
+
+      // Re-generate thumbnail
+      const newThumbnailPath = await this.createThumbnail(newTempPath, newId, document.type);
+
+      // Clean up previous clean images and shift remaining clean paths
+      if (document.cleanTempPaths) {
+        const oldCleanTempPaths = document.cleanTempPaths;
+        const newCleanTempPaths: Record<number, string> = {};
+
+        for (const [pageStr, path] of Object.entries(oldCleanTempPaths)) {
+          const page = parseInt(pageStr, 10);
+          if (page === pageNumber) {
+            unlink(path).catch(() => {});
+          } else if (page > pageNumber) {
+            newCleanTempPaths[page - 1] = path;
+          } else {
+            newCleanTempPaths[page] = path;
+          }
+        }
+        document.cleanTempPaths = newCleanTempPaths;
+      }
+
+      // Shift signatures
+      if (document.signatures) {
+        document.signatures = document.signatures
+          .filter((sig) => sig.page !== pageNumber)
+          .map((sig) => {
+            if (sig.page > pageNumber) {
+              return { ...sig, page: sig.page - 1 };
+            }
+            return sig;
+          });
+      }
+
+      document.tempPath = newTempPath;
+      if (newThumbnailPath) {
+        document.thumbnailPath = newThumbnailPath;
+      }
+
+      const fileStats = await stat(newTempPath);
+      document.size = fileStats.size;
+      document.pageCount = await this.getPdfPageCount(newTempPath);
+
+      // Clean up old files
+      unlink(oldTempPath).catch(() => {});
+      if (oldThumbnailPath) {
+        unlink(oldThumbnailPath).catch(() => {});
+      }
+
+      return {
+        success: true,
+        data: document,
+      };
+    } catch (error) {
+      console.error('Failed to delete page:', error);
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to delete PDF page',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  }
+
+  /**
+   * Add a page (blank or from file) to a PDF document
+   */
+  async addPage(id: string, pageNumber: number, sourceFilePath?: string): Promise<Result<DocumentItem>> {
+    try {
+      const document = FileService.documents.get(id);
+      if (!document) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.FILE_NOT_FOUND,
+            message: 'Document not found',
+            recoverable: false,
+          },
+        };
+      }
+
+      if (document.type !== DocumentType.PDF) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: 'Document is not a PDF',
+            recoverable: false,
+          },
+        };
+      }
+
+      const oldTempPath = document.tempPath;
+      const oldThumbnailPath = document.thumbnailPath;
+
+      const { PDFDocument } = await import('pdf-lib');
+      const currentPdfBytes = await readFile(oldTempPath);
+      const pdfDoc = await PDFDocument.load(currentPdfBytes, { ignoreEncryption: true });
+
+      const pageCountBefore = pdfDoc.getPageCount();
+      const insertIndex = Math.max(0, Math.min(pageNumber - 1, pageCountBefore));
+
+      let pagesInserted = 0;
+
+      if (sourceFilePath) {
+        const ext = sourceFilePath.toLowerCase();
+        const isImage = ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') ||
+                        ext.endsWith('.webp') || ext.endsWith('.bmp') || ext.endsWith('.tiff') || ext.endsWith('.tif');
+
+        if (isImage) {
+          const fileBytes = await readFile(sourceFilePath);
+          let imageBuffer: Uint8Array = new Uint8Array(fileBytes);
+          let isPng = ext.endsWith('.png');
+
+          if (ext.endsWith('.webp') || ext.endsWith('.bmp') || ext.endsWith('.tiff') || ext.endsWith('.tif')) {
+            const pngBuffer = await sharp(fileBytes).png().toBuffer();
+            imageBuffer = new Uint8Array(pngBuffer);
+            isPng = true;
+          }
+
+          const image = isPng
+            ? await pdfDoc.embedPng(imageBuffer)
+            : await pdfDoc.embedJpg(imageBuffer);
+
+          const { width, height } = image.scale(1);
+          const newPage = pdfDoc.insertPage(insertIndex, [width, height]);
+          newPage.drawImage(image, { x: 0, y: 0, width, height });
+          pagesInserted = 1;
+        } else if (ext.endsWith('.pdf')) {
+          const sourcePdfBytes = await readFile(sourceFilePath);
+          const sourcePdfDoc = await PDFDocument.load(sourcePdfBytes, { ignoreEncryption: true });
+          const copiedPages = await pdfDoc.copyPages(sourcePdfDoc, sourcePdfDoc.getPageIndices());
+
+          copiedPages.forEach((copiedPage, i) => {
+            pdfDoc.insertPage(insertIndex + i, copiedPage);
+          });
+          pagesInserted = copiedPages.length;
+        } else {
+          return {
+            success: false,
+            error: {
+              code: ErrorCode.UNKNOWN_ERROR,
+              message: 'Unsupported file type for page insertion',
+              recoverable: false,
+            },
+          };
+        }
+      } else {
+        // Insert a blank page
+        let width = 595.28;
+        let height = 841.89;
+        if (pageCountBefore > 0) {
+          const refPageIndex = Math.min(insertIndex, pageCountBefore - 1);
+          const refPage = pdfDoc.getPage(refPageIndex);
+          width = refPage.getWidth();
+          height = refPage.getHeight();
+        }
+        pdfDoc.insertPage(insertIndex, [width, height]);
+        pagesInserted = 1;
+      }
+
+      if (pagesInserted === 0) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: 'No pages were inserted',
+            recoverable: false,
+          },
+        };
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      const finalBuffer = Buffer.from(pdfBytes);
+
+      const newId = uuidv4();
+      const sanitized = sanitizeFilename(basename(document.filename));
+      const newTempPath = getTempFilePath(`${newId}_${sanitized}`);
+
+      await writeFile(newTempPath, finalBuffer);
+
+      // Re-generate thumbnail
+      const newThumbnailPath = await this.createThumbnail(newTempPath, newId, document.type);
+
+      const insertedStartPage = insertIndex + 1;
+
+      if (document.cleanTempPaths) {
+        const oldCleanTempPaths = document.cleanTempPaths;
+        const newCleanTempPaths: Record<number, string> = {};
+
+        for (const [pageStr, path] of Object.entries(oldCleanTempPaths)) {
+          const page = parseInt(pageStr, 10);
+          if (page >= insertedStartPage) {
+            newCleanTempPaths[page + pagesInserted] = path;
+          } else {
+            newCleanTempPaths[page] = path;
+          }
+        }
+        document.cleanTempPaths = newCleanTempPaths;
+      }
+
+      // Shift signatures
+      if (document.signatures) {
+        document.signatures = document.signatures.map((sig) => {
+          if (sig.page >= insertedStartPage) {
+            return { ...sig, page: sig.page + pagesInserted };
+          }
+          return sig;
+        });
+      }
+
+      document.tempPath = newTempPath;
+      if (newThumbnailPath) {
+        document.thumbnailPath = newThumbnailPath;
+      }
+
+      const fileStats = await stat(newTempPath);
+      document.size = fileStats.size;
+      document.pageCount = await this.getPdfPageCount(newTempPath);
+
+      // Clean up old files
+      unlink(oldTempPath).catch(() => {});
+      if (oldThumbnailPath) {
+        unlink(oldThumbnailPath).catch(() => {});
+      }
+
+      return {
+        success: true,
+        data: document,
+      };
+    } catch (error) {
+      console.error('Failed to add page:', error);
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to add PDF page',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  }
+
+  /**
    * Get document by ID
    */
   getDocument(id: string): DocumentItem | undefined {

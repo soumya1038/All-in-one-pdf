@@ -67,6 +67,15 @@ const api: IpcApi = {
   renderPdfPage: (documentId, pageNumber) =>
     ipcRenderer.invoke(IpcChannel.DOCUMENT_RENDER_PDF_PAGE, { documentId, pageNumber }),
 
+  deletePage: (documentId, pageNumber) =>
+    ipcRenderer.invoke(IpcChannel.DOCUMENT_DELETE_PAGE, { documentId, pageNumber }),
+
+  addPage: (documentId, pageNumber, sourceFilePath) =>
+    ipcRenderer.invoke(IpcChannel.DOCUMENT_ADD_PAGE, { documentId, pageNumber, sourceFilePath }),
+
+  renderPdfPageThumbnail: (documentId, pageNumber) =>
+    ipcRenderer.invoke(IpcChannel.DOCUMENT_RENDER_PDF_PAGE_THUMBNAIL, { documentId, pageNumber }),
+
   // System operations
   getRecentFiles: () =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_GET_RECENT),

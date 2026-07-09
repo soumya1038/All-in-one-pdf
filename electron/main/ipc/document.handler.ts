@@ -83,4 +83,76 @@ export function registerDocumentHandlers(): void {
       return result;
     }
   });
+
+  /**
+   * Delete a page from a PDF document
+   */
+  ipcMain.handle(IpcChannel.DOCUMENT_DELETE_PAGE, async (_, { documentId, pageNumber }) => {
+    try {
+      return await fileService.deletePage(documentId, pageNumber);
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to delete PDF page',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  });
+
+  /**
+   * Add a page (blank or from file) to a PDF document
+   */
+  ipcMain.handle(IpcChannel.DOCUMENT_ADD_PAGE, async (_, { documentId, pageNumber, sourceFilePath }) => {
+    try {
+      return await fileService.addPage(documentId, pageNumber, sourceFilePath);
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to add PDF page',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  });
+
+  /**
+   * Render a PDF page as a small thumbnail
+   */
+  ipcMain.handle(IpcChannel.DOCUMENT_RENDER_PDF_PAGE_THUMBNAIL, async (_, { documentId, pageNumber }) => {
+    try {
+      const document = fileService.getDocument(documentId);
+      if (!document) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.FILE_NOT_FOUND,
+            message: 'Document not found',
+            recoverable: false,
+          },
+        };
+      }
+
+      const page = pageNumber || 1;
+      const thumbPath = getTempFilePath(`${documentId}_page_${page}_thumb.jpg`);
+      await generatePdfThumbnail(document.tempPath, thumbPath, 150, 200, page);
+      return { success: true, data: thumbPath };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to generate page thumbnail',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  });
 }

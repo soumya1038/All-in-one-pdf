@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft, Printer, Crop, Sparkles,
-  RotateCcw, Sliders, Check, ShieldAlert, X,
-  AlertCircle, Upload, XCircle, ChevronLeft, ChevronRight
+  RotateCcw, RotateCw, Sliders, Check, ShieldAlert, X,
+  AlertCircle, Upload, XCircle, ChevronLeft, ChevronRight,
+  Trash2, Plus, FilePlus
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
@@ -144,6 +145,30 @@ function warpPerspective(
   dstCtx.putImageData(dstData, 0, 0);
 }
 
+// Helper to rotate a base64 image by 90 degrees
+const rotateBase64Image = (base64Str: string, clockwise: boolean): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.height;
+      canvas.height = img.width;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((clockwise ? 90 : -90) * Math.PI / 180);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      }
+      resolve(canvas.toDataURL());
+    };
+    img.onerror = () => {
+      resolve(base64Str);
+    };
+    img.src = base64Str;
+  });
+};
+
+
 function PreviewScreen() {
   const documents = useAppStore((state) => state.documents);
   const selectedDocumentId = useAppStore((state) => state.ui.selectedDocumentId);
@@ -161,12 +186,17 @@ function PreviewScreen() {
   const [previewImagePath, setPreviewImagePath] = useState<string | null>(null);
   const [timestamp, setTimestamp] = useState<number>(Date.now());
   const [pageNumber, setPageNumber] = useState<number>(1);
+  const [showAddPageMenu, setShowAddPageMenu] = useState(false);
+  const [pageThumbnails, setPageThumbnails] = useState<Record<number, string>>({});
 
   // Canvas Refs for editing
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const originalImageRef = useRef<HTMLImageElement | null>(null);
+  const editedImageRef = useRef<HTMLCanvasElement | HTMLImageElement | null>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  const [activeFilter, setActiveFilter] = useState<'grayscale' | 'binarize' | 'clean' | null>(null);
 
   // 4 Corner Perspective Crop State
   const [cropBox, setCropBox] = useState<QuadCrop>({
@@ -244,6 +274,116 @@ function PreviewScreen() {
     }
   };
 
+  const loadAllPageThumbnails = async () => {
+    if (!doc || doc.type !== 'PDF') return;
+    const thumbs: Record<number, string> = {};
+    for (let i = 1; i <= doc.pageCount; i++) {
+      try {
+        const res = await window.electron.renderPdfPageThumbnail(doc.id, i);
+        if (res.success) {
+          thumbs[i] = res.data;
+        }
+      } catch (e) {
+        console.error(`Failed to load thumbnail for page ${i}`, e);
+      }
+    }
+    setPageThumbnails(thumbs);
+  };
+
+  useEffect(() => {
+    if (doc && doc.type === 'PDF') {
+      loadAllPageThumbnails();
+    }
+  }, [selectedDocumentId, doc?.pageCount, doc?.tempPath]);
+
+  const handleDeletePage = async () => {
+    if (!doc) return;
+    const confirmed = await useAppStore.getState().showConfirm(
+      `Are you sure you want to delete Page ${pageNumber} of "${doc.filename}"? This action cannot be undone.`,
+      'Delete Page'
+    );
+    if (!confirmed) return;
+
+    setIsProcessing(true);
+    try {
+      const result = await window.electron.deletePage(doc.id, pageNumber);
+      if (result.success) {
+        updateDocument(doc.id, result.data);
+        toast.success(`Page ${pageNumber} deleted successfully`);
+        const newPageNum = Math.max(1, Math.min(pageNumber, result.data.pageCount));
+        setPageNumber(newPageNum);
+        setTimestamp(Date.now());
+      } else {
+        toast.error(result.error.message);
+      }
+    } catch (e) {
+      toast.error('Failed to delete page');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAddBlankPage = async () => {
+    setShowAddPageMenu(false);
+    if (!doc) return;
+    setIsProcessing(true);
+    try {
+      const insertAtPage = pageNumber + 1;
+      const result = await window.electron.addPage(doc.id, insertAtPage);
+      if (result.success) {
+        updateDocument(doc.id, result.data);
+        toast.success('Blank page inserted successfully');
+        setPageNumber(insertAtPage);
+        setTimestamp(Date.now());
+      } else {
+        toast.error(result.error.message);
+      }
+    } catch (e) {
+      toast.error('Failed to insert blank page');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAddPageFromFile = async () => {
+    setShowAddPageMenu(false);
+    if (!doc) return;
+
+    try {
+      const dialogRes = await window.electron.showOpenDialog({
+        title: 'Select PDF or Image to Insert',
+        filters: [
+          { name: 'Supported Files', extensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'bmp', 'tiff', 'tif'] },
+          { name: 'PDF Documents', extensions: ['pdf'] },
+          { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tiff', 'tif'] }
+        ],
+        properties: ['openFile']
+      });
+
+      if (!dialogRes.success || !dialogRes.data || dialogRes.data.length === 0) {
+        return;
+      }
+
+      const filePath = dialogRes.data[0];
+      setIsProcessing(true);
+
+      const insertAtPage = pageNumber + 1;
+      const result = await window.electron.addPage(doc.id, insertAtPage, filePath);
+      if (result.success) {
+        updateDocument(doc.id, result.data);
+        toast.success('Page(s) inserted successfully from file');
+        setPageNumber(insertAtPage);
+        setTimestamp(Date.now());
+      } else {
+        toast.error(result.error.message);
+      }
+    } catch (e) {
+      toast.error('Failed to insert page from file');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Image load & setup for editing
   const setupEditorImage = () => {
     if (!doc) return;
@@ -253,6 +393,8 @@ function PreviewScreen() {
     img.src = `docuflow:///${baseImgPath.replace(/\\/g, '/')}?t=${timestamp}`;
     img.onload = () => {
       originalImageRef.current = img;
+      editedImageRef.current = img;
+      setActiveFilter(null);
       resetCanvas();
     };
     img.onerror = () => {
@@ -272,6 +414,9 @@ function PreviewScreen() {
     const img = originalImageRef.current;
     if (!canvas || !img) return;
 
+    editedImageRef.current = img;
+    setActiveFilter(null);
+
     canvas.width = img.width;
     canvas.height = img.height;
     const ctx = canvas.getContext('2d');
@@ -287,18 +432,9 @@ function PreviewScreen() {
     setPlacedSignatures((doc?.signatures || []).filter((sig) => (sig.page || 1) === pageNumber));
   };
 
-  // Filter application
-  const applyFilter = (filterType: 'grayscale' | 'binarize' | 'clean') => {
-    const canvas = canvasRef.current;
-    const img = originalImageRef.current;
-    if (!canvas || !img) return;
-
-    canvas.width = img.width;
-    canvas.height = img.height;
+  const applyFilterPixels = (canvas: HTMLCanvasElement, filterType: 'grayscale' | 'binarize' | 'clean') => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    ctx.drawImage(img, 0, 0);
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
@@ -340,20 +476,45 @@ function PreviewScreen() {
     }
 
     ctx.putImageData(imageData, 0, 0);
+  };
+
+  const redrawCanvas = (filterOverride?: 'grayscale' | 'binarize' | 'clean' | null) => {
+    const canvas = canvasRef.current;
+    const img = editedImageRef.current || originalImageRef.current;
+    if (!canvas || !img) return;
+
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(img, 0, 0);
+
+    const filterToApply = filterOverride !== undefined ? filterOverride : activeFilter;
+    if (filterToApply) {
+      applyFilterPixels(canvas, filterToApply);
+    }
+  };
+
+  // Filter application
+  const applyFilter = (filterType: 'grayscale' | 'binarize' | 'clean') => {
+    setActiveFilter(filterType);
+    redrawCanvas(filterType);
     toast.success(`${filterType.toUpperCase()} filter applied`);
   };
 
   // Run perspective warp cropping
   const executeCrop = () => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const img = editedImageRef.current || originalImageRef.current;
+    if (!canvas || !img) return;
 
-    // Map percentage handles back to actual source image pixel coordinates
+    // Map percentage handles back to actual source image pixel coordinates based on img width/height
     const srcPoints: Point[] = [
-      { x: (cropBox.tl.x / 100) * canvas.width, y: (cropBox.tl.y / 100) * canvas.height },
-      { x: (cropBox.tr.x / 100) * canvas.width, y: (cropBox.tr.y / 100) * canvas.height },
-      { x: (cropBox.bl.x / 100) * canvas.width, y: (cropBox.bl.y / 100) * canvas.height },
-      { x: (cropBox.br.x / 100) * canvas.width, y: (cropBox.br.y / 100) * canvas.height }
+      { x: (cropBox.tl.x / 100) * img.width, y: (cropBox.tl.y / 100) * img.height },
+      { x: (cropBox.tr.x / 100) * img.width, y: (cropBox.tr.y / 100) * img.height },
+      { x: (cropBox.bl.x / 100) * img.width, y: (cropBox.bl.y / 100) * img.height },
+      { x: (cropBox.br.x / 100) * img.width, y: (cropBox.br.y / 100) * img.height }
     ];
 
     // Compute size of destination bounding rect (use average coordinates)
@@ -375,11 +536,16 @@ function PreviewScreen() {
 
     // Create temp canvas containing original state
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = canvas.width;
-    tempCanvas.height = canvas.height;
+    tempCanvas.width = img.width;
+    tempCanvas.height = img.height;
     const tempCtx = tempCanvas.getContext('2d');
     if (!tempCtx) return;
-    tempCtx.drawImage(canvas, 0, 0);
+    tempCtx.drawImage(img, 0, 0);
+
+    // Create cropped canvas for destination
+    const croppedCanvas = document.createElement('canvas');
+    croppedCanvas.width = dstWidth;
+    croppedCanvas.height = dstHeight;
 
     // Solve homography
     const matrix = getHomography(srcPoints, dstPoints);
@@ -389,9 +555,10 @@ function PreviewScreen() {
     }
 
     // Resize canvas and project pixels projectively
-    canvas.width = dstWidth;
-    canvas.height = dstHeight;
-    warpPerspective(tempCanvas, canvas, matrix, dstWidth, dstHeight);
+    warpPerspective(tempCanvas, croppedCanvas, matrix, dstWidth, dstHeight);
+
+    // Save the cropped version
+    editedImageRef.current = croppedCanvas;
 
     // Reset selection handles
     setCropBox({
@@ -400,7 +567,84 @@ function PreviewScreen() {
       bl: { x: 5, y: 95 },
       br: { x: 95, y: 95 }
     });
+
+    // Redraw canvas and apply active filter if present
+    redrawCanvas();
+
     toast.success('Perspective crop applied');
+  };
+
+  const handleRotate = async (clockwise: boolean) => {
+    const img = editedImageRef.current || originalImageRef.current;
+    if (!img) return;
+
+    // Create rotated canvas
+    const rotatedCanvas = document.createElement('canvas');
+    rotatedCanvas.width = img.height;
+    rotatedCanvas.height = img.width;
+    const ctx = rotatedCanvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
+    ctx.rotate((clockwise ? 90 : -90) * Math.PI / 180);
+    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+
+    // Save rotated image
+    editedImageRef.current = rotatedCanvas;
+
+    // Rotate placed signatures for this page
+    const rotatedSigs = await Promise.all(
+      placedSignatures.map(async (sig) => {
+        const rotatedImgSrc = await rotateBase64Image(sig.imgSrc, clockwise);
+        const newX = clockwise ? 100 - sig.y - sig.height : sig.y;
+        const newY = clockwise ? sig.x : 100 - sig.x - sig.width;
+        return {
+          ...sig,
+          x: newX,
+          y: newY,
+          width: sig.height,
+          height: sig.width,
+          imgSrc: rotatedImgSrc
+        };
+      })
+    );
+    setPlacedSignatures(rotatedSigs);
+
+    // Reset crop handles to fit the new aspect ratio / rotated image
+    setCropBox({
+      tl: { x: 10, y: 10 },
+      tr: { x: 90, y: 10 },
+      bl: { x: 10, y: 90 },
+      br: { x: 90, y: 90 }
+    });
+
+    // Redraw canvas
+    redrawCanvas();
+
+    toast.success(`Rotated 90° ${clockwise ? 'clockwise' : 'counter-clockwise'}`);
+  };
+
+  const handleResetFilters = () => {
+    setActiveFilter(null);
+    redrawCanvas(null);
+    toast.success('Filters reset');
+  };
+
+  const handleResetCrop = () => {
+    const img = originalImageRef.current;
+    if (!img) return;
+
+    editedImageRef.current = img;
+    setCropBox({
+      tl: { x: 10, y: 10 },
+      tr: { x: 90, y: 10 },
+      bl: { x: 10, y: 90 },
+      br: { x: 90, y: 90 }
+    });
+
+    setPlacedSignatures((doc?.signatures || []).filter((sig) => (sig.page || 1) === pageNumber));
+    redrawCanvas();
+    toast.success('Crop and rotation reset');
   };
 
   // Draw real-time magnifying loupe zoom
@@ -412,16 +656,16 @@ function PreviewScreen() {
     const ctx = loupeCanvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear loupe (now 180x180)
-    ctx.clearRect(0, 0, 180, 180);
+    // Clear loupe (now 140x140)
+    ctx.clearRect(0, 0, 140, 140);
 
     // Map handle percentages to canvas coordinates
     const px = (pctX / 100) * canvas.width;
     const py = (pctY / 100) * canvas.height;
 
-    // Magnified zoom parameters: crop a 40x40 square around handle and stretch to 180x180 loupe (4.5x zoom)
-    const srcSize = 40;
-    const destSize = 180;
+    // Magnified zoom parameters: crop a 46x46 square around handle and stretch to 140x140 loupe (~3x zoom)
+    const srcSize = 46;
+    const destSize = 140;
 
     // Draw the zoomed image onto the loupe canvas
     ctx.drawImage(
@@ -436,16 +680,16 @@ function PreviewScreen() {
       destSize
     );
 
-    // Draw 90-degree crossing target lines (crosshairs) crossing the center (90, 90)
+    // Draw 90-degree crossing target lines (crosshairs) crossing the center (70, 70)
     ctx.strokeStyle = '#EF4444'; // Solid Red crosshair lines
     ctx.lineWidth = 1;
     ctx.beginPath();
     // Vertical line
-    ctx.moveTo(90, 0);
-    ctx.lineTo(90, 180);
+    ctx.moveTo(70, 0);
+    ctx.lineTo(70, 140);
     // Horizontal line
-    ctx.moveTo(0, 90);
-    ctx.lineTo(180, 90);
+    ctx.moveTo(0, 70);
+    ctx.lineTo(140, 70);
     ctx.stroke();
   };
 
@@ -965,6 +1209,55 @@ function PreviewScreen() {
           <div className="flex items-center gap-2">
             {!isEditing ? (
               <>
+                {doc.type === 'PDF' && (
+                  <div className="relative">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setShowAddPageMenu(!showAddPageMenu)}
+                      disabled={isProcessing || isPrinting}
+                    >
+                      <Plus size={16} className="mr-1.5" />
+                      Add Page
+                    </Button>
+                    {showAddPageMenu && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-10" 
+                          onClick={() => setShowAddPageMenu(false)}
+                        />
+                        <div className="absolute right-0 mt-1.5 w-48 bg-bg-surface border border-border rounded-lg shadow-lg py-1 z-20 animate-fade-in">
+                          <button
+                            onClick={handleAddBlankPage}
+                            className="w-full text-left px-4 py-2.5 text-xs font-semibold hover:bg-bg-sunken text-text-primary flex items-center gap-2 transition-fast"
+                          >
+                            <FilePlus size={14} className="text-accent" />
+                            Insert Blank Page
+                          </button>
+                          <button
+                            onClick={handleAddPageFromFile}
+                            className="w-full text-left px-4 py-2.5 text-xs font-semibold hover:bg-bg-sunken text-text-primary flex items-center gap-2 transition-fast"
+                          >
+                            <Upload size={14} className="text-accent" />
+                            Insert Page from File
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+                {doc.type === 'PDF' && doc.pageCount > 1 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="text-error hover:bg-error-light hover:border-error"
+                    onClick={handleDeletePage}
+                    disabled={isProcessing || isPrinting}
+                  >
+                    <Trash2 size={16} className="mr-1.5" />
+                    Delete Page
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
                   size="sm"
@@ -972,7 +1265,7 @@ function PreviewScreen() {
                   disabled={isProcessing || isPrinting}
                 >
                   <Crop size={16} className="mr-1.5" />
-                  Edit Document
+                  {doc.type === 'PDF' ? 'Edit Page' : 'Edit Document'}
                 </Button>
                 <Button
                   variant="primary"
@@ -995,7 +1288,53 @@ function PreviewScreen() {
 
       {/* Main Workspace Area */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Side: Viewer or Editor Canvas */}
+        {/* Left Sidebar: Pages list (only for PDF files, when not editing) */}
+        {!isEditing && doc && doc.type === 'PDF' && (
+          <div className="w-48 border-r border-border bg-bg-surface flex flex-col h-full select-none animate-slide-in">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <span className="text-xs font-semibold text-text-primary uppercase tracking-wider">Pages</span>
+              <span className="text-[10px] font-medium bg-bg-sunken px-2 py-0.5 rounded text-text-secondary">
+                Total: {doc.pageCount}
+              </span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+              {Array.from({ length: doc.pageCount }, (_, i) => i + 1).map((p) => {
+                const isSelected = pageNumber === p;
+                const thumbPath = pageThumbnails[p];
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setPageNumber(p)}
+                    className={`group flex flex-col items-center p-2 rounded-lg border transition-fast text-center relative ${
+                      isSelected
+                        ? 'border-accent bg-accent/5 shadow-sm'
+                        : 'border-border hover:border-text-secondary hover:bg-bg-sunken'
+                    }`}
+                  >
+                    <div className="w-full aspect-[3/4] bg-bg-sunken rounded border border-border/50 overflow-hidden relative flex items-center justify-center mb-1.5 shadow-inner">
+                      {thumbPath ? (
+                        <img
+                          src={`docuflow:///${thumbPath.replace(/\\/g, '/')}?t=${timestamp}`}
+                          alt={`Page ${p}`}
+                          className="w-full h-full object-contain select-none bg-white p-1"
+                        />
+                      ) : (
+                        <div className="animate-pulse bg-bg-sunken w-full h-full flex items-center justify-center text-[10px] text-text-muted">
+                          Loading...
+                        </div>
+                      )}
+                    </div>
+                    <span className={`text-xs font-medium ${isSelected ? 'text-accent font-semibold' : 'text-text-secondary'}`}>
+                      Page {p}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Center/Viewer Side: Viewer or Editor Canvas */}
         <div className="flex-1 p-6 flex flex-col justify-between items-center overflow-hidden gap-4">
           <div className="w-full flex-1 bg-bg-surface border border-border rounded-lg shadow-md overflow-hidden relative flex justify-center items-center p-4">
             {!isEditing ? (
@@ -1240,7 +1579,7 @@ function PreviewScreen() {
                   <Button
                     variant="ghost"
                     className="w-full justify-start text-sm py-2"
-                    onClick={resetCanvas}
+                    onClick={handleResetFilters}
                   >
                     <RotateCcw size={16} className="mr-2" />
                     Reset Filters
@@ -1259,12 +1598,12 @@ function PreviewScreen() {
                   {/* Zoom Loupe Preview Container inside control panel */}
                   <div className="border border-border rounded-lg bg-bg-sunken p-3 flex flex-col items-center justify-center gap-2">
                     <span className="text-[10px] font-semibold text-text-muted uppercase self-start">Zoom Loupe</span>
-                    <div className="w-[180px] h-[180px] rounded-lg border border-border bg-white overflow-hidden relative flex justify-center items-center shadow-inner">
+                    <div className="w-[140px] h-[140px] rounded-lg border border-border bg-white overflow-hidden relative flex justify-center items-center shadow-inner">
                       {dragType && ['tl', 'tr', 'bl', 'br'].includes(dragType) ? (
                         <canvas
                           ref={loupeCanvasRef}
-                          width={180}
-                          height={180}
+                          width={140}
+                          height={140}
                           className="w-full h-full"
                         />
                       ) : (
@@ -1273,6 +1612,25 @@ function PreviewScreen() {
                         </span>
                       )}
                     </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      className="flex-1 justify-center py-2 text-xs"
+                      onClick={() => handleRotate(false)}
+                    >
+                      <RotateCcw size={14} className="mr-1.5" />
+                      Rotate CCW
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="flex-1 justify-center py-2 text-xs"
+                      onClick={() => handleRotate(true)}
+                    >
+                      <RotateCw size={14} className="mr-1.5" />
+                      Rotate CW
+                    </Button>
                   </div>
 
                   <Button
@@ -1286,10 +1644,10 @@ function PreviewScreen() {
                   <Button
                     variant="ghost"
                     className="w-full justify-start text-sm"
-                    onClick={resetCanvas}
+                    onClick={handleResetCrop}
                   >
                     <RotateCcw size={16} className="mr-2" />
-                    Reset Crop
+                    Reset Crop & Rotation
                   </Button>
                 </div>
               )}

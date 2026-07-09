@@ -32,6 +32,9 @@ export enum IpcChannel {
   DOCUMENT_APPLY_EDIT = 'docuflow:document:applyEdit',
   DOCUMENT_GET_PREVIEW = 'docuflow:document:getPreview',
   DOCUMENT_RENDER_PDF_PAGE = 'docuflow:document:renderPdfPage',
+  DOCUMENT_DELETE_PAGE = 'docuflow:document:deletePage',
+  DOCUMENT_ADD_PAGE = 'docuflow:document:addPage',
+  DOCUMENT_RENDER_PDF_PAGE_THUMBNAIL = 'docuflow:document:renderPdfPageThumbnail',
   
   // Output operations
   OUTPUT_PROCESS = 'docuflow:output:process',
@@ -189,6 +192,9 @@ export interface IpcApi {
   // Document operations
   applyDocumentEdit: (documentId: string, base64Data: string, cleanBase64Data?: string, signatures?: PlacedSignature[], pageNumber?: number) => Promise<Result<DocumentItem>>;
   renderPdfPage: (documentId: string, pageNumber?: number) => Promise<Result<string>>;
+  deletePage: (documentId: string, pageNumber: number) => Promise<Result<DocumentItem>>;
+  addPage: (documentId: string, pageNumber: number, sourceFilePath?: string) => Promise<Result<DocumentItem>>;
+  renderPdfPageThumbnail: (documentId: string, pageNumber: number) => Promise<Result<string>>;
   
   // System operations
   getRecentFiles: () => Promise<Result<RecentFile[]>>;

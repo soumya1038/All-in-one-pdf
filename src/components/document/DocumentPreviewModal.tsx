@@ -5,7 +5,7 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { 
   Printer, Crop, ShieldAlert, Sparkles, 
-  RotateCcw, Sliders, Check, X
+  RotateCcw, RotateCw, Sliders, Check, X
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
@@ -133,6 +133,30 @@ function warpPerspective(
   dstCtx.putImageData(dstData, 0, 0);
 }
 
+// Helper to rotate a base64 image by 90 degrees
+const rotateBase64Image = (base64Str: string, clockwise: boolean): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.height;
+      canvas.height = img.width;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((clockwise ? 90 : -90) * Math.PI / 180);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      }
+      resolve(canvas.toDataURL());
+    };
+    img.onerror = () => {
+      resolve(base64Str);
+    };
+    img.src = base64Str;
+  });
+};
+
+
 function DocumentPreviewModal() {
   const modal = useAppStore((state) => state.ui.modal);
   const closeModal = useAppStore((state) => state.closeModal);
@@ -153,6 +177,9 @@ function DocumentPreviewModal() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const originalImageRef = useRef<HTMLImageElement | null>(null);
+  const editedImageRef = useRef<HTMLCanvasElement | HTMLImageElement | null>(null);
+
+  const [activeFilter, setActiveFilter] = useState<'grayscale' | 'binarize' | 'clean' | null>(null);
 
   // 4 Corner Perspective Crop State
   const [cropBox, setCropBox] = useState<QuadCrop>({
@@ -189,6 +216,8 @@ function DocumentPreviewModal() {
       img.src = `docuflow:///${doc.tempPath.replace(/\\/g, '/')}`;
       img.onload = () => {
         originalImageRef.current = img;
+        editedImageRef.current = img;
+        setActiveFilter(null);
         resetCanvas();
       };
     }
@@ -198,6 +227,9 @@ function DocumentPreviewModal() {
     const canvas = canvasRef.current;
     const img = originalImageRef.current;
     if (!canvas || !img) return;
+
+    editedImageRef.current = img;
+    setActiveFilter(null);
 
     canvas.width = img.width;
     canvas.height = img.height;
@@ -484,18 +516,9 @@ function DocumentPreviewModal() {
     }
   }, [isOpen, isEditing, activeTab, cvStatus, hasAutoDetected]);
 
-  // Filter application
-  const applyFilter = (filterType: 'grayscale' | 'binarize' | 'clean') => {
-    const canvas = canvasRef.current;
-    const img = originalImageRef.current;
-    if (!canvas || !img) return;
-
-    canvas.width = img.width;
-    canvas.height = img.height;
+  const applyFilterPixels = (canvas: HTMLCanvasElement, filterType: 'grayscale' | 'binarize' | 'clean') => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    ctx.drawImage(img, 0, 0);
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
@@ -534,22 +557,44 @@ function DocumentPreviewModal() {
     }
 
     ctx.putImageData(imageData, 0, 0);
+  };
+
+  const redrawCanvas = (filterOverride?: 'grayscale' | 'binarize' | 'clean' | null) => {
+    const canvas = canvasRef.current;
+    const img = editedImageRef.current || originalImageRef.current;
+    if (!canvas || !img) return;
+
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(img, 0, 0);
+
+    const filterToApply = filterOverride !== undefined ? filterOverride : activeFilter;
+    if (filterToApply) {
+      applyFilterPixels(canvas, filterToApply);
+    }
+  };
+
+  // Filter application
+  const applyFilter = (filterType: 'grayscale' | 'binarize' | 'clean') => {
+    setActiveFilter(filterType);
+    redrawCanvas(filterType);
     toast.success(`${filterType.charAt(0).toUpperCase() + filterType.slice(1)} filter applied`);
   };
 
   // Perform 4-corner perspective warp crop
   const executeCrop = () => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const img = editedImageRef.current || originalImageRef.current;
+    if (!canvas || !img) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Convert crop corner percentages to pixel coordinates
-    const pTL = { x: (cropBox.tl.x / 100) * canvas.width, y: (cropBox.tl.y / 100) * canvas.height };
-    const pTR = { x: (cropBox.tr.x / 100) * canvas.width, y: (cropBox.tr.y / 100) * canvas.height };
-    const pBL = { x: (cropBox.bl.x / 100) * canvas.width, y: (cropBox.bl.y / 100) * canvas.height };
-    const pBR = { x: (cropBox.br.x / 100) * canvas.width, y: (cropBox.br.y / 100) * canvas.height };
+    // Convert crop corner percentages to pixel coordinates based on img width/height
+    const pTL = { x: (cropBox.tl.x / 100) * img.width, y: (cropBox.tl.y / 100) * img.height };
+    const pTR = { x: (cropBox.tr.x / 100) * img.width, y: (cropBox.tr.y / 100) * img.height };
+    const pBL = { x: (cropBox.bl.x / 100) * img.width, y: (cropBox.bl.y / 100) * img.height };
+    const pBR = { x: (cropBox.br.x / 100) * img.width, y: (cropBox.br.y / 100) * img.height };
 
     // Calculate dimensions of destination flat rectangle (average width and height of selected quad)
     const w1 = Math.hypot(pTR.x - pTL.x, pTR.y - pTL.y);
@@ -567,11 +612,16 @@ function DocumentPreviewModal() {
 
     // Create an offscreen temporary canvas to hold original image data
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = canvas.width;
-    tempCanvas.height = canvas.height;
+    tempCanvas.width = img.width;
+    tempCanvas.height = img.height;
     const tempCtx = tempCanvas.getContext('2d');
     if (!tempCtx) return;
-    tempCtx.drawImage(canvas, 0, 0);
+    tempCtx.drawImage(img, 0, 0);
+
+    // Create cropped canvas for destination
+    const croppedCanvas = document.createElement('canvas');
+    croppedCanvas.width = dstWidth;
+    croppedCanvas.height = dstHeight;
 
     // Points
     const srcPoints = [pTL, pTR, pBL, pBR];
@@ -585,12 +635,11 @@ function DocumentPreviewModal() {
     // Get transform matrix
     const matrix = getPerspectiveTransform(srcPoints, dstPoints);
 
-    // Resize main canvas
-    canvas.width = dstWidth;
-    canvas.height = dstHeight;
-
     // Warp perspective
-    warpPerspective(tempCanvas, canvas, matrix, dstWidth, dstHeight);
+    warpPerspective(tempCanvas, croppedCanvas, matrix, dstWidth, dstHeight);
+
+    // Save the cropped version
+    editedImageRef.current = croppedCanvas;
 
     // Reset crop handles to standard quad box
     setCropBox({
@@ -600,7 +649,84 @@ function DocumentPreviewModal() {
       br: { x: 90, y: 90 }
     });
 
+    // Redraw canvas and apply active filter if present
+    redrawCanvas();
+
     toast.success('Perspective crop applied');
+  };
+
+  const handleRotate = async (clockwise: boolean) => {
+    const img = editedImageRef.current || originalImageRef.current;
+    if (!img) return;
+
+    // Create rotated canvas
+    const rotatedCanvas = document.createElement('canvas');
+    rotatedCanvas.width = img.height;
+    rotatedCanvas.height = img.width;
+    const ctx = rotatedCanvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
+    ctx.rotate((clockwise ? 90 : -90) * Math.PI / 180);
+    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+
+    // Save rotated image
+    editedImageRef.current = rotatedCanvas;
+
+    // Rotate signature if present
+    if (signatureImage) {
+      const rotatedSigImgSrc = await rotateBase64Image(signatureImage.src, clockwise);
+      const newSigImg = new Image();
+      newSigImg.src = rotatedSigImgSrc;
+      newSigImg.onload = () => {
+        setSignatureImage(newSigImg);
+      };
+
+      const newX = clockwise ? 100 - sigPosition.y - sigPosition.height : sigPosition.y;
+      const newY = clockwise ? sigPosition.x : 100 - sigPosition.x - sigPosition.width;
+      setSigPosition({
+        x: newX,
+        y: newY,
+        width: sigPosition.height,
+        height: sigPosition.width
+      });
+    }
+
+    // Reset crop handles to fit the new aspect ratio / rotated image
+    setCropBox({
+      tl: { x: 10, y: 10 },
+      tr: { x: 90, y: 10 },
+      bl: { x: 10, y: 90 },
+      br: { x: 90, y: 90 }
+    });
+
+    // Redraw canvas
+    redrawCanvas();
+
+    toast.success(`Rotated 90° ${clockwise ? 'clockwise' : 'counter-clockwise'}`);
+  };
+
+  const handleResetFilters = () => {
+    setActiveFilter(null);
+    redrawCanvas(null);
+    toast.success('Filters reset');
+  };
+
+  const handleResetCrop = () => {
+    const img = originalImageRef.current;
+    if (!img) return;
+
+    editedImageRef.current = img;
+    setCropBox({
+      tl: { x: 10, y: 10 },
+      tr: { x: 90, y: 10 },
+      bl: { x: 10, y: 90 },
+      br: { x: 90, y: 90 }
+    });
+
+    setSignatureImage(null);
+    redrawCanvas();
+    toast.success('Crop and rotation reset');
   };
 
   // Signature Pad Handlers
@@ -1013,10 +1139,10 @@ function DocumentPreviewModal() {
                         <ShieldAlert size={16} className="mr-2" />
                         Crisp Black & White
                       </Button>
-                      <Button 
+                       <Button 
                         variant="ghost" 
                         className="w-full justify-start text-sm"
-                        onClick={resetCanvas}
+                        onClick={handleResetFilters}
                       >
                         <RotateCcw size={16} className="mr-2" />
                         Reset Filters
@@ -1054,6 +1180,24 @@ function DocumentPreviewModal() {
                       )}
 
                       <div className="border-t border-border my-1" />
+                       <div className="flex gap-2">
+                        <Button
+                          variant="secondary"
+                          className="flex-1 justify-center py-2 text-xs"
+                          onClick={() => handleRotate(false)}
+                        >
+                          <RotateCcw size={14} className="mr-1.5" />
+                          Rotate CCW
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          className="flex-1 justify-center py-2 text-xs"
+                          onClick={() => handleRotate(true)}
+                        >
+                          <RotateCw size={14} className="mr-1.5" />
+                          Rotate CW
+                        </Button>
+                      </div>
 
                       <Button 
                         variant="primary" 
@@ -1066,10 +1210,10 @@ function DocumentPreviewModal() {
                       <Button 
                         variant="ghost" 
                         className="w-full justify-start text-sm"
-                        onClick={resetCanvas}
+                        onClick={handleResetCrop}
                       >
                         <RotateCcw size={16} className="mr-2" />
-                        Reset Crop
+                        Reset Crop & Rotation
                       </Button>
                     </div>
                   )}
