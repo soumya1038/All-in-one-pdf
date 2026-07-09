@@ -35,6 +35,7 @@ export enum IpcChannel {
   DOCUMENT_DELETE_PAGE = 'docuflow:document:deletePage',
   DOCUMENT_ADD_PAGE = 'docuflow:document:addPage',
   DOCUMENT_RENDER_PDF_PAGE_THUMBNAIL = 'docuflow:document:renderPdfPageThumbnail',
+  DOCUMENT_REORDER_PAGES = 'docuflow:document:reorderPages',
   
   // Output operations
   OUTPUT_PROCESS = 'docuflow:output:process',
@@ -195,6 +196,7 @@ export interface IpcApi {
   deletePage: (documentId: string, pageNumber: number) => Promise<Result<DocumentItem>>;
   addPage: (documentId: string, pageNumber: number, sourceFilePath?: string) => Promise<Result<DocumentItem>>;
   renderPdfPageThumbnail: (documentId: string, pageNumber: number) => Promise<Result<string>>;
+  reorderPages: (documentId: string, newPageOrder: number[]) => Promise<Result<DocumentItem>>;
   
   // System operations
   getRecentFiles: () => Promise<Result<RecentFile[]>>;

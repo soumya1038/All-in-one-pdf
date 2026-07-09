@@ -76,6 +76,9 @@ const api: IpcApi = {
   renderPdfPageThumbnail: (documentId, pageNumber) =>
     ipcRenderer.invoke(IpcChannel.DOCUMENT_RENDER_PDF_PAGE_THUMBNAIL, { documentId, pageNumber }),
 
+  reorderPages: (documentId, newPageOrder) =>
+    ipcRenderer.invoke(IpcChannel.DOCUMENT_REORDER_PAGES, { documentId, newPageOrder }),
+
   // System operations
   getRecentFiles: () =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_GET_RECENT),

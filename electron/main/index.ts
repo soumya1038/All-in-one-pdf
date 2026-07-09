@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol } from 'electron';
+import { app, BrowserWindow, protocol, dialog } from 'electron';
 import { join, normalize } from 'path';
 import { createMainWindow } from './window';
 import { registerIpcHandlers } from './ipc';
@@ -18,6 +18,44 @@ async function createWindow() {
 
   // Register all IPC handlers
   registerIpcHandlers();
+
+  // Handle window close confirmation if a process is ongoing
+  let isCloseConfirmed = false;
+  mainWindow.on('close', async (e) => {
+    if (isCloseConfirmed || !mainWindow) return;
+    
+    e.preventDefault();
+    
+    try {
+      // Safely inspect state via executeJavaScript
+      const isProcessing = await mainWindow.webContents.executeJavaScript(
+        'window.useAppStore ? (window.useAppStore.getState().ui.isLoading || window.useAppStore.getState().processingStatus !== null || window.useAppStore.getState().scannerStatus?.status === "scanning") : false'
+      );
+      
+      if (isProcessing) {
+        const choice = dialog.showMessageBoxSync(mainWindow, {
+          type: 'question',
+          buttons: ['Yes', 'No'],
+          defaultId: 1,
+          title: 'Confirm Exit',
+          message: 'An operation is currently in progress. Closing the application will abort this process. Are you sure you want to terminate the process and close the application?',
+          cancelId: 1
+        });
+        
+        if (choice === 0) {
+          isCloseConfirmed = true;
+          mainWindow.close();
+        }
+      } else {
+        isCloseConfirmed = true;
+        mainWindow.close();
+      }
+    } catch (err) {
+      console.error('Error during close confirmation check:', err);
+      isCloseConfirmed = true;
+      mainWindow.close();
+    }
+  });
 
   // Load the app
   if (process.env.NODE_ENV === 'development') {

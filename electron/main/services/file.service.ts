@@ -664,6 +664,136 @@ export class FileService {
   }
 
   /**
+   * Reorder pages in a PDF document
+   */
+  async reorderPages(id: string, newPageOrder: number[]): Promise<Result<DocumentItem>> {
+    try {
+      const document = FileService.documents.get(id);
+      if (!document) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.FILE_NOT_FOUND,
+            message: 'Document not found',
+            recoverable: false,
+          },
+        };
+      }
+
+      if (document.type !== DocumentType.PDF) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: 'Document is not a PDF',
+            recoverable: false,
+          },
+        };
+      }
+
+      const oldTempPath = document.tempPath;
+      const oldThumbnailPath = document.thumbnailPath;
+
+      const { PDFDocument } = await import('pdf-lib');
+      const currentPdfBytes = await readFile(oldTempPath);
+      const pdfDoc = await PDFDocument.load(currentPdfBytes, { ignoreEncryption: true });
+
+      const pageCount = pdfDoc.getPageCount();
+      // Validate page order values
+      for (const p of newPageOrder) {
+        if (p < 1 || p > pageCount) {
+          return {
+            success: false,
+            error: {
+              code: ErrorCode.UNKNOWN_ERROR,
+              message: `Invalid page number in sequence: ${p}`,
+              recoverable: false,
+            },
+          };
+        }
+      }
+
+      // Create new PDF doc and copy pages in specified order
+      const newPdfDoc = await PDFDocument.create();
+      const copiedPages = await newPdfDoc.copyPages(
+        pdfDoc,
+        newPageOrder.map((p) => p - 1)
+      );
+      copiedPages.forEach((page) => newPdfDoc.addPage(page));
+
+      const pdfBytes = await newPdfDoc.save();
+      const finalBuffer = Buffer.from(pdfBytes);
+
+      const newId = uuidv4();
+      const sanitized = sanitizeFilename(basename(document.filename));
+      const newTempPath = getTempFilePath(`${newId}_${sanitized}`);
+
+      await writeFile(newTempPath, finalBuffer);
+
+      // Re-generate thumbnail
+      const newThumbnailPath = await this.createThumbnail(newTempPath, newId, document.type);
+
+      // Shift/update cleanTempPaths map according to the page reordering mapping
+      const pageMapping = new Map<number, number>();
+      newPageOrder.forEach((oldPageNum, index) => {
+        pageMapping.set(oldPageNum, index + 1);
+      });
+
+      if (document.cleanTempPaths) {
+        const oldCleanTempPaths = document.cleanTempPaths;
+        const newCleanTempPaths: Record<number, string> = {};
+        for (const [pageStr, path] of Object.entries(oldCleanTempPaths)) {
+          const oldPage = parseInt(pageStr, 10);
+          const newPage = pageMapping.get(oldPage);
+          if (newPage !== undefined) {
+            newCleanTempPaths[newPage] = path;
+          }
+        }
+        document.cleanTempPaths = newCleanTempPaths;
+      }
+
+      // Update signatures
+      if (document.signatures) {
+        document.signatures = document.signatures.map((sig) => {
+          const newPage = pageMapping.get(sig.page);
+          return { ...sig, page: newPage !== undefined ? newPage : sig.page };
+        });
+      }
+
+      document.tempPath = newTempPath;
+      if (newThumbnailPath) {
+        document.thumbnailPath = newThumbnailPath;
+      }
+
+      const fileStats = await stat(newTempPath);
+      document.size = fileStats.size;
+      document.pageCount = await this.getPdfPageCount(newTempPath);
+
+      // Clean up old files asynchronously (silently fail if locked)
+      unlink(oldTempPath).catch(() => {});
+      if (oldThumbnailPath) {
+        unlink(oldThumbnailPath).catch(() => {});
+      }
+
+      return {
+        success: true,
+        data: document,
+      };
+    } catch (error) {
+      console.error('Failed to reorder pages:', error);
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to reorder PDF pages',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  }
+
+  /**
    * Get document by ID
    */
   getDocument(id: string): DocumentItem | undefined {

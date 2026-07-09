@@ -155,4 +155,23 @@ export function registerDocumentHandlers(): void {
       };
     }
   });
+
+  /**
+   * Reorder pages in a PDF document
+   */
+  ipcMain.handle(IpcChannel.DOCUMENT_REORDER_PAGES, async (_, { documentId, newPageOrder }) => {
+    try {
+      return await fileService.reorderPages(documentId, newPageOrder);
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to reorder PDF pages',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  });
 }

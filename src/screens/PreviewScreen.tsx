@@ -10,6 +10,23 @@ import { useAppStore } from '../store/appStore';
 import { AppView } from '../types/UI.types';
 import { PlacedSignature } from '../types/Document.types';
 import Button from '../components/ui/Button';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // Edit Tab types
 enum EditTab {
@@ -169,6 +186,76 @@ const rotateBase64Image = (base64Str: string, clockwise: boolean): Promise<strin
 };
 
 
+interface SortablePageItemProps {
+  id: number;
+  pageNumber: number;
+  isSelected: boolean;
+  thumbPath?: string;
+  timestamp: number;
+  isProcessing: boolean;
+  onClick: () => void;
+}
+
+function SortablePageItem({
+  id,
+  pageNumber,
+  isSelected,
+  thumbPath,
+  timestamp,
+  isProcessing,
+  onClick
+}: SortablePageItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 30 : undefined
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={isProcessing ? undefined : onClick}
+      className={`w-full flex flex-col items-center p-2 rounded-lg border transition-fast text-center relative cursor-grab active:cursor-grabbing select-none ${
+        isSelected
+          ? 'border-accent bg-accent/5 shadow-sm'
+          : 'border-border hover:border-text-secondary hover:bg-bg-sunken'
+      }`}
+    >
+      <div className="w-full aspect-[3/4] bg-bg-sunken rounded border border-border/50 overflow-hidden relative flex items-center justify-center mb-1.5 shadow-inner pointer-events-none">
+        {thumbPath ? (
+          <img
+            src={`docuflow:///${thumbPath.replace(/\\/g, '/')}?t=${timestamp}`}
+            alt={`Page ${pageNumber}`}
+            className="w-full h-full object-contain select-none bg-white p-1"
+          />
+        ) : (
+          <div className="animate-pulse bg-bg-sunken w-full h-full flex items-center justify-center text-[10px] text-text-muted">
+            Loading...
+          </div>
+        )}
+      </div>
+
+      <span className="text-xs font-medium pointer-events-none text-text-secondary group-hover:text-text-primary">
+        Page {pageNumber}
+      </span>
+    </div>
+  );
+}
+
+
 function PreviewScreen() {
   const documents = useAppStore((state) => state.documents);
   const selectedDocumentId = useAppStore((state) => state.ui.selectedDocumentId);
@@ -226,6 +313,62 @@ function PreviewScreen() {
 
   const doc = documents.find((d) => d.id === selectedDocumentId);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !doc) return;
+
+    const pages = Array.from({ length: doc.pageCount }, (_, i) => i + 1);
+    const oldIndex = pages.indexOf(active.id as number);
+    const newIndex = pages.indexOf(over.id as number);
+
+    const reorderedPages = arrayMove(pages, oldIndex, newIndex);
+
+    setIsProcessing(true);
+    try {
+      const result = await window.electron.reorderPages(doc.id, reorderedPages);
+      if (result.success) {
+        // Find the new page number for the currently selected page
+        const selectedPageIndex = reorderedPages.indexOf(pageNumber);
+        const newPageNum = selectedPageIndex !== -1 ? selectedPageIndex + 1 : 1;
+
+        // 1. Update document item metadata in store
+        updateDocument(doc.id, result.data);
+
+        // 2. Explicitly load/generate all thumbnails for the updated document first!
+        await loadAllPageThumbnails(result.data);
+
+        // 3. Explicitly render the preview image for the new active page number
+        const renderResult = await window.electron.renderPdfPage(doc.id, newPageNum);
+        if (renderResult.success) {
+          setPreviewImagePath(renderResult.data);
+        }
+
+        // 4. Update the pageNumber and timestamp at the same time to force a full re-render
+        setPageNumber(newPageNum);
+        setTimestamp(Date.now());
+
+        toast.success('Pages rearranged successfully');
+      } else {
+        toast.error(result.error.message);
+      }
+    } catch (e) {
+      toast.error('Failed to rearrange pages');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Load existing signatures when entering edit mode or page switches
   useEffect(() => {
     if (doc && isEditing) {
@@ -274,19 +417,22 @@ function PreviewScreen() {
     }
   };
 
-  const loadAllPageThumbnails = async () => {
-    if (!doc || doc.type !== 'PDF') return;
+  const loadAllPageThumbnails = async (targetDoc = doc) => {
+    if (!targetDoc || targetDoc.type !== 'PDF') return;
     const thumbs: Record<number, string> = {};
-    for (let i = 1; i <= doc.pageCount; i++) {
-      try {
-        const res = await window.electron.renderPdfPageThumbnail(doc.id, i);
-        if (res.success) {
-          thumbs[i] = res.data;
+    const pages = Array.from({ length: targetDoc.pageCount }, (_, i) => i + 1);
+    await Promise.all(
+      pages.map(async (i) => {
+        try {
+          const res = await window.electron.renderPdfPageThumbnail(targetDoc.id, i);
+          if (res.success) {
+            thumbs[i] = res.data;
+          }
+        } catch (e) {
+          console.error(`Failed to load thumbnail for page ${i}`, e);
         }
-      } catch (e) {
-        console.error(`Failed to load thumbnail for page ${i}`, e);
-      }
-    }
+      })
+    );
     setPageThumbnails(thumbs);
   };
 
@@ -1298,38 +1444,33 @@ function PreviewScreen() {
               </span>
             </div>
             <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
-              {Array.from({ length: doc.pageCount }, (_, i) => i + 1).map((p) => {
-                const isSelected = pageNumber === p;
-                const thumbPath = pageThumbnails[p];
-                return (
-                  <button
-                    key={p}
-                    onClick={() => setPageNumber(p)}
-                    className={`group flex flex-col items-center p-2 rounded-lg border transition-fast text-center relative ${
-                      isSelected
-                        ? 'border-accent bg-accent/5 shadow-sm'
-                        : 'border-border hover:border-text-secondary hover:bg-bg-sunken'
-                    }`}
-                  >
-                    <div className="w-full aspect-[3/4] bg-bg-sunken rounded border border-border/50 overflow-hidden relative flex items-center justify-center mb-1.5 shadow-inner">
-                      {thumbPath ? (
-                        <img
-                          src={`docuflow:///${thumbPath.replace(/\\/g, '/')}?t=${timestamp}`}
-                          alt={`Page ${p}`}
-                          className="w-full h-full object-contain select-none bg-white p-1"
-                        />
-                      ) : (
-                        <div className="animate-pulse bg-bg-sunken w-full h-full flex items-center justify-center text-[10px] text-text-muted">
-                          Loading...
-                        </div>
-                      )}
-                    </div>
-                    <span className={`text-xs font-medium ${isSelected ? 'text-accent font-semibold' : 'text-text-secondary'}`}>
-                      Page {p}
-                    </span>
-                  </button>
-                );
-              })}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={Array.from({ length: doc.pageCount }, (_, i) => i + 1)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {Array.from({ length: doc.pageCount }, (_, i) => i + 1).map((p) => {
+                    const isSelected = pageNumber === p;
+                    const thumbPath = pageThumbnails[p];
+                    return (
+                      <SortablePageItem
+                        key={p}
+                        id={p}
+                        pageNumber={p}
+                        isSelected={isSelected}
+                        thumbPath={thumbPath}
+                        timestamp={timestamp}
+                        isProcessing={isProcessing}
+                        onClick={() => setPageNumber(p)}
+                      />
+                    );
+                  })}
+                </SortableContext>
+              </DndContext>
             </div>
           </div>
         )}
