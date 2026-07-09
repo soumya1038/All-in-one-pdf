@@ -43,6 +43,7 @@ interface AppState {
   setSelectedDocument: (id?: string) => void;
   setActiveWorkflow: (workflow: WorkflowType) => void;
   setPreviewBackView: (view?: AppView) => void;
+  toggleSidebar: () => void;
   sessionSignatures: string[];
   addSessionSignature: (signature: string) => void;
   clearSessionSignatures: () => void;
@@ -225,6 +226,11 @@ export const useAppStore = create<AppState>((set) => ({
   setPreviewBackView: (view) =>
     set((state) => ({
       ui: { ...state.ui, previewBackView: view },
+    })),
+
+  toggleSidebar: () =>
+    set((state) => ({
+      ui: { ...state.ui, sidebarCollapsed: !state.ui.sidebarCollapsed },
     })),
 
   confirmDialog: {

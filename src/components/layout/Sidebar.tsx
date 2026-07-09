@@ -18,6 +18,8 @@ function Sidebar() {
   const updateOutputOptions = useAppStore((state) => state.updateOutputOptions);
   const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
   
+  const sidebarCollapsed = useAppStore((state) => state.ui.sidebarCollapsed);
+  const toggleSidebar = useAppStore((state) => state.toggleSidebar);
 
   const activeWorkflow = useAppStore((state) => state.ui.activeWorkflow);
   const currentView = useAppStore((state) => state.ui.currentView);
@@ -157,18 +159,72 @@ function Sidebar() {
   ];
 
   return (
-    <div className="w-55 bg-bg-surface border-r border-border flex flex-col h-full">
-      <div className="p-6">
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-4">
-          Quick Actions
-        </h2>
+    <div className={`bg-bg-surface border-r border-border flex flex-col h-full transition-all duration-normal select-none ${sidebarCollapsed ? 'w-20' : 'w-55'}`}>
+      <div className="p-4 flex flex-col h-full">
+        {/* Sidebar Header with Toggle Icon */}
+        {!sidebarCollapsed ? (
+          <div className="flex items-center justify-between mb-4 px-2">
+            <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+              Quick Actions
+            </h2>
+            <button
+              onClick={toggleSidebar}
+              className="p-1.5 hover:bg-bg-sunken rounded text-text-secondary hover:text-accent transition-fast flex items-center justify-center"
+              title="Collapse Sidebar"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="M9 3v18" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <div className="flex justify-center mb-6">
+            <button
+              onClick={toggleSidebar}
+              className="p-1.5 hover:bg-bg-sunken rounded text-text-secondary hover:text-accent transition-fast flex items-center justify-center"
+              title="Expand Sidebar"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="M9 3v18" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Sidebar Actions Content */}
         {isProcessing ? (
           <div className="flex flex-col items-center justify-center py-12 text-center text-text-secondary animate-pulse">
             <Loader2 className="animate-spin text-accent mb-3" size={24} />
-            <p className="text-sm font-semibold text-text-primary">Processing...</p>
-            <p className="text-xs max-w-[150px] mt-1 text-text-muted">
-              Quick actions are disabled.
-            </p>
+            {!sidebarCollapsed && (
+              <>
+                <p className="text-sm font-semibold text-text-primary">Processing...</p>
+                <p className="text-xs max-w-[150px] mt-1 text-text-muted">
+                  Quick actions are disabled.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -177,7 +233,9 @@ function Sidebar() {
                 key={index}
                 onClick={action.action}
                 disabled={isDisabled}
-                className={`flex items-center gap-3 p-3 text-left rounded-md transition-fast group w-full
+                title={sidebarCollapsed ? action.label : undefined}
+                className={`flex items-center rounded-md transition-fast group w-full
+                  ${sidebarCollapsed ? 'justify-center p-3' : 'gap-3 p-3 text-left'}
                   ${isDisabled 
                     ? 'opacity-40 cursor-not-allowed' 
                     : 'hover:bg-bg-sunken active:bg-bg-sunken'
@@ -187,9 +245,11 @@ function Sidebar() {
                 <div className={`transition-fast ${isDisabled ? 'text-text-muted' : 'text-text-secondary group-hover:text-accent'}`}>
                   {action.icon}
                 </div>
-                <p className={`text-sm font-medium transition-fast ${isDisabled ? 'text-text-muted' : 'text-text-primary group-hover:text-accent'}`}>
-                  {action.label}
-                </p>
+                {!sidebarCollapsed && (
+                  <p className={`text-sm font-medium transition-fast ${isDisabled ? 'text-text-muted' : 'text-text-primary group-hover:text-accent'}`}>
+                    {action.label}
+                  </p>
+                )}
               </button>
             ))}
           </div>
