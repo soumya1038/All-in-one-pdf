@@ -1,4 +1,5 @@
 import { ipcMain, shell, BrowserWindow, dialog } from 'electron';
+import { writeFile } from 'fs/promises';
 import { IpcChannel } from '../../../src/types/IPC.types';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
 import { RecentFile } from '../../../src/types/Document.types';
@@ -201,6 +202,50 @@ export function registerSystemHandlers(): void {
       return result.response === 1; // true = Confirm clicked
     } catch {
       return false;
+    }
+  });
+
+  /**
+   * Save a base64 string to a file selected by the user
+   */
+  ipcMain.handle(IpcChannel.SYSTEM_SAVE_BASE64, async (_, { base64Data, defaultFilename, filters }) => {
+    try {
+      const focusedWindow = BrowserWindow.getFocusedWindow();
+      const options = {
+        title: 'Save File',
+        defaultPath: defaultFilename,
+        filters: filters || [{ name: 'All Files', extensions: ['*'] }],
+      };
+      
+      const saveDialogResult = focusedWindow
+        ? await dialog.showSaveDialog(focusedWindow, options)
+        : await dialog.showSaveDialog(options);
+
+      if (saveDialogResult.canceled || !saveDialogResult.filePath) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.SAVE_FAILED,
+            message: 'Save cancelled by user',
+            recoverable: true,
+          },
+        };
+      }
+
+      const buffer = Buffer.from(base64Data.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      await writeFile(saveDialogResult.filePath, buffer);
+
+      return { success: true, data: saveDialogResult.filePath };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to save file',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
     }
   });
 

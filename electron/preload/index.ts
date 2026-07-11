@@ -107,6 +107,9 @@ const api: IpcApi = {
   showConfirmDialog: (message, title) =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_DIALOG_CONFIRM, message, title),
 
+  saveFileFromBase64: (base64Data, defaultFilename, filters) =>
+    ipcRenderer.invoke(IpcChannel.SYSTEM_SAVE_BASE64, { base64Data, defaultFilename, filters }),
+
   // Window controls (fire-and-forget — no return value needed)
   minimizeWindow: () => ipcRenderer.send(IpcChannel.WINDOW_MINIMIZE),
   maximizeWindow: () => ipcRenderer.send(IpcChannel.WINDOW_MAXIMIZE),

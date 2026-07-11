@@ -8,6 +8,8 @@ export enum AppView {
   PROCESSING = 'PROCESSING',
   SUCCESS = 'SUCCESS',
   PREVIEW = 'PREVIEW',
+  PDF_COMPOSE = 'PDF_COMPOSE',
+  IMAGE_EDIT = 'IMAGE_EDIT',
 }
 
 /**

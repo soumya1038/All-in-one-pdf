@@ -14,6 +14,9 @@ function HomeScreen() {
   const activeWorkflow = useAppStore((state) => state.ui.activeWorkflow);
   const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
 
+  const documents = useAppStore((state) => state.documents);
+  const clearDocuments = useAppStore((state) => state.clearDocuments);
+
   // Load recent files on mount
   useEffect(() => {
     const loadRecentFiles = async () => {
@@ -24,6 +27,16 @@ function HomeScreen() {
     };
     loadRecentFiles();
   }, [setRecentFiles]);
+
+  // Clear documents if landing back on Home to ensure a clean session
+  useEffect(() => {
+    if (documents.length > 0) {
+      for (const doc of documents) {
+        window.electron.deleteFile(doc.id).catch(() => {});
+      }
+      clearDocuments();
+    }
+  }, [documents, clearDocuments]);
 
   const handleBrowseClick = async () => {
     try {

@@ -1,7 +1,8 @@
-import { CheckCircle2, FolderOpen, FileText, Home } from 'lucide-react';
+import { CheckCircle2, FolderOpen, FileText, Home, Minimize, Scissors, Lock, ArrowRightLeft, Camera, Layout } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
-import { AppView } from '../types/UI.types';
+import { AppView, WorkflowType } from '../types/UI.types';
+import { OutputFormat } from '../types/Output.types';
 import Button from '../components/ui/Button';
 import { formatFileSize } from '../utils/formatFileSize';
 
@@ -10,6 +11,7 @@ function SuccessScreen() {
   const documents = useAppStore((state) => state.documents);
   const clearDocuments = useAppStore((state) => state.clearDocuments);
   const setView = useAppStore((state) => state.setView);
+  const setActiveWorkflow = useAppStore((state) => state.setActiveWorkflow);
 
   // Read actual output info from processingStatus (set by ProcessingScreen after IPC completes)
   const processingStatus = useAppStore((state) => state.processingStatus);
@@ -52,6 +54,91 @@ function SuccessScreen() {
     }
     clearDocuments();
     setView(AppView.HOME);
+  };
+
+  const handleUseFile = async (targetWorkflow: WorkflowType | 'PDF_COMPOSE' | 'IMAGE_EDIT') => {
+    if (!outputPath) return;
+    
+    const loadingToastId = toast.loading('Loading file into new session...');
+    
+    try {
+      // 1. Upload/import the file so the backend creates a proper DocumentItem in temp dir
+      const result = await window.electron.uploadFiles([outputPath]);
+      if (result.success && result.data.length > 0) {
+        toast.dismiss(loadingToastId);
+        
+        // 2. Clear old session documents
+        for (const doc of documents) {
+          await window.electron.deleteFile(doc.id).catch(() => {});
+        }
+        clearDocuments();
+        
+        // 3. Add the new imported document to the store
+        const importedDoc = result.data[0];
+        useAppStore.getState().addDocuments([importedDoc]);
+        
+        // 4. Navigate and set options based on the chosen shortcut
+        const fileBaseName = importedDoc.filename.substring(0, importedDoc.filename.lastIndexOf('.')) || importedDoc.filename;
+        
+        if (targetWorkflow === 'PDF_COMPOSE') {
+          setView(AppView.PDF_COMPOSE);
+        } else if (targetWorkflow === 'IMAGE_EDIT') {
+          setView(AppView.IMAGE_EDIT);
+        } else {
+          setActiveWorkflow(targetWorkflow as WorkflowType);
+          
+          if (targetWorkflow === WorkflowType.COMPRESS) {
+            useAppStore.getState().updateOutputOptions({
+              format: OutputFormat.PDF,
+              compress: true,
+              filename: `${fileBaseName}_compressed`
+            });
+            setView(AppView.OUTPUT_OPTIONS);
+          } else if (targetWorkflow === WorkflowType.COMPRESS_IMAGE) {
+            const ext = importedDoc.filename.toLowerCase();
+            let format = OutputFormat.JPEG;
+            if (ext.endsWith('.png')) format = OutputFormat.PNG;
+            else if (ext.endsWith('.tiff') || ext.endsWith('.tif')) format = OutputFormat.TIFF;
+            
+            useAppStore.getState().updateOutputOptions({
+              format,
+              compress: true,
+              filename: `${fileBaseName}_compressed`
+            });
+            setView(AppView.OUTPUT_OPTIONS);
+          } else if (targetWorkflow === WorkflowType.PROTECT) {
+            useAppStore.getState().updateOutputOptions({
+              format: OutputFormat.PDF,
+              protection: { enabled: true },
+              filename: `${fileBaseName}_protected`
+            });
+            setView(AppView.OUTPUT_OPTIONS);
+          } else if (targetWorkflow === WorkflowType.CONVERT) {
+            useAppStore.getState().updateOutputOptions({
+              filename: `${fileBaseName}_converted`
+            });
+            setView(AppView.OUTPUT_OPTIONS);
+          } else if (targetWorkflow === WorkflowType.SPLIT) {
+            useAppStore.getState().updateOutputOptions({
+              format: OutputFormat.PDF,
+              filename: `${fileBaseName}_split`
+            });
+            setView(AppView.OUTPUT_OPTIONS);
+          } else {
+            setView(AppView.DOCUMENT_LIST);
+          }
+        }
+        
+        toast.success('Started editing file in new session');
+      } else {
+        toast.dismiss(loadingToastId);
+        toast.error('Failed to import file: ' + (result?.error?.message || 'Unknown error'));
+      }
+    } catch (err) {
+      toast.dismiss(loadingToastId);
+      toast.error('Failed to use file');
+      console.error(err);
+    }
   };
 
   return (
@@ -143,6 +230,103 @@ function SuccessScreen() {
               Show in Explorer
             </Button>
           </div>
+
+          {/* Quick Actions (Continue with this file) */}
+          {outputPath && !isFolderOutput && (
+            <div className="pt-6 border-t border-border space-y-4">
+              <div className="text-left">
+                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                  Continue with this file
+                </h3>
+                <p className="text-[11px] text-text-muted mt-0.5">
+                  Directly perform another action on the output file
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {(() => {
+                  const ext = outputPath.toLowerCase();
+                  const isPdf = ext.endsWith('.pdf');
+                  const isImage = ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.png') || ext.endsWith('.webp') || ext.endsWith('.bmp') || ext.endsWith('.tiff') || ext.endsWith('.tif');
+                  
+                  return (
+                    <>
+                      {isPdf && (
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => handleUseFile(WorkflowType.COMPRESS)}
+                            className="flex items-center justify-center gap-2 font-medium"
+                          >
+                            <Minimize size={16} />
+                            Compress PDF
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => handleUseFile(WorkflowType.SPLIT)}
+                            className="flex items-center justify-center gap-2 font-medium"
+                          >
+                            <Scissors size={16} />
+                            Split PDF
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => handleUseFile(WorkflowType.PROTECT)}
+                            className="flex items-center justify-center gap-2 font-medium"
+                          >
+                            <Lock size={16} />
+                            Protect PDF
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => handleUseFile(WorkflowType.CONVERT)}
+                            className="flex items-center justify-center gap-2 font-medium"
+                          >
+                            <ArrowRightLeft size={16} />
+                            Convert PDF
+                          </Button>
+                        </>
+                      )}
+                      {isImage && (
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => handleUseFile(WorkflowType.COMPRESS_IMAGE)}
+                            className="flex items-center justify-center gap-2 font-medium"
+                          >
+                            <Minimize size={16} />
+                            Compress Image
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => handleUseFile('IMAGE_EDIT')}
+                            className="flex items-center justify-center gap-2 font-medium"
+                          >
+                            <Camera size={16} />
+                            Passport Photo
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => handleUseFile('PDF_COMPOSE')}
+                            className="flex items-center justify-center gap-2 font-medium"
+                          >
+                            <Layout size={16} />
+                            PDF Compose
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
 
           {/* Start New */}
           <div className="pt-4 border-t border-border">

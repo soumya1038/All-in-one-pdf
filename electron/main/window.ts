@@ -38,8 +38,8 @@ export function createMainWindow(): BrowserWindow {
   // Set Content Security Policy
   const isDev = process.env.NODE_ENV === 'development';
   const csp = isDev
-    ? ["default-src 'self' 'unsafe-inline' 'unsafe-eval' data: file:; connect-src 'self' ws: http:; img-src 'self' data: blob: file: docuflow:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-src 'self' file:; object-src 'self' file:;"]
-    : ["default-src 'self' file:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: file: docuflow:; connect-src 'self'; frame-src 'self' file:; object-src 'self' file:;"];
+    ? ["default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: file:; connect-src 'self' ws: http: https: blob: data:; img-src 'self' data: blob: file: docuflow:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-src 'self' file:; object-src 'self' file:; worker-src 'self' blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: file:;"]
+    : ["default-src 'self' file:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: file:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: file: docuflow:; connect-src 'self' https: blob: data:; frame-src 'self' file:; object-src 'self' file:; worker-src 'self' blob:;"];
 
   window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({

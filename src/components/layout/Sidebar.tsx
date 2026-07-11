@@ -1,4 +1,4 @@
-import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage } from 'lucide-react';
+import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage, Layout, Camera } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../../store/appStore';
 import { ModalType, AppView, WorkflowType } from '../../types/UI.types';
@@ -32,7 +32,34 @@ function Sidebar() {
     scannerStatus === ScannerStatus.SCANNING || 
     scannerStatus === ScannerStatus.CHECKING;
 
-  const isDisabled = isProcessing || activeWorkflow !== WorkflowType.NONE;
+  const isDisabled = isProcessing;
+
+  const showConfirm = useAppStore((state) => state.showConfirm);
+
+  const hasActiveProgress = 
+    (currentView === AppView.PDF_COMPOSE && documents.length > 0) ||
+    (currentView === AppView.IMAGE_EDIT && documents.some(d => d.type === 'IMAGE')) ||
+    (activeWorkflow !== WorkflowType.NONE);
+
+  const handleActionClick = async (targetView: AppView, targetWorkflow: WorkflowType, label: string, executeAction: () => void) => {
+    if (currentView === targetView && (targetWorkflow === WorkflowType.NONE || activeWorkflow === targetWorkflow)) {
+      return;
+    }
+
+    if (hasActiveProgress) {
+      const confirmed = await showConfirm(
+        `Are you sure you want to switch to "${label}"? Any unsaved edits or active process data will be lost.`,
+        'Switch Process'
+      );
+      if (!confirmed) return;
+    }
+
+    if (targetWorkflow === WorkflowType.NONE) {
+      setActiveWorkflow(WorkflowType.NONE);
+    }
+    
+    executeAction();
+  };
 
   /**
    * When the user clicks a quick action in the sidebar:
@@ -129,32 +156,42 @@ function Sidebar() {
     {
       icon: <Minimize size={20} />,
       label: 'Compress PDF',
-      action: () => handleWorkflowClick(WorkflowType.COMPRESS),
+      action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.COMPRESS, 'Compress PDF', () => handleWorkflowClick(WorkflowType.COMPRESS)),
     },
     {
       icon: <FileImage size={20} />,
       label: 'Compress Image',
-      action: () => handleWorkflowClick(WorkflowType.COMPRESS_IMAGE),
+      action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.COMPRESS_IMAGE, 'Compress Image', () => handleWorkflowClick(WorkflowType.COMPRESS_IMAGE)),
     },
     {
       icon: <Merge size={20} />,
       label: 'Merge PDFs',
-      action: () => handleWorkflowClick(WorkflowType.MERGE),
+      action: () => handleActionClick(AppView.DOCUMENT_LIST, WorkflowType.MERGE, 'Merge PDFs', () => handleWorkflowClick(WorkflowType.MERGE)),
     },
     {
       icon: <ArrowRightLeft size={20} />,
       label: 'Convert Format',
-      action: () => handleWorkflowClick(WorkflowType.CONVERT),
+      action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.CONVERT, 'Convert Format', () => handleWorkflowClick(WorkflowType.CONVERT)),
     },
     {
       icon: <Scissors size={20} />,
       label: 'Split PDF',
-      action: () => handleWorkflowClick(WorkflowType.SPLIT),
+      action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.SPLIT, 'Split PDF', () => handleWorkflowClick(WorkflowType.SPLIT)),
     },
     {
       icon: <Lock size={20} />,
       label: 'Protect PDF',
-      action: () => handleWorkflowClick(WorkflowType.PROTECT),
+      action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.PROTECT, 'Protect PDF', () => handleWorkflowClick(WorkflowType.PROTECT)),
+    },
+    {
+      icon: <Layout size={20} />,
+      label: 'PDF Compose',
+      action: () => handleActionClick(AppView.PDF_COMPOSE, WorkflowType.NONE, 'PDF Compose', () => setView(AppView.PDF_COMPOSE)),
+    },
+    {
+      icon: <Camera size={20} />,
+      label: 'Passport Photo',
+      action: () => handleActionClick(AppView.IMAGE_EDIT, WorkflowType.NONE, 'Passport Photo', () => setView(AppView.IMAGE_EDIT)),
     },
   ];
 

@@ -51,6 +51,7 @@ export enum IpcChannel {
   SYSTEM_SHOW_OPEN_DIALOG = 'docuflow:system:showOpenDialog',
   SYSTEM_PRINT = 'docuflow:system:print',
   SYSTEM_DIALOG_CONFIRM = 'docuflow:system:dialogConfirm',
+  SYSTEM_SAVE_BASE64 = 'docuflow:system:saveBase64',
 
   // Window controls
   WINDOW_MINIMIZE = 'docuflow:window:minimize',
@@ -208,6 +209,7 @@ export interface IpcApi {
   showOpenDialog: (options?: unknown) => Promise<Result<string[]>>;
   printDocument: (documentId: string) => Promise<Result<void>>;
   showConfirmDialog: (message: string, title?: string) => Promise<boolean>;
+  saveFileFromBase64: (base64Data: string, defaultFilename: string, filters: { name: string; extensions: string[] }[]) => Promise<Result<string>>;
 
   // Window controls
   minimizeWindow: () => void;
