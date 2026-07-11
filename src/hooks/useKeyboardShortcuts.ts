@@ -14,13 +14,14 @@ export function useKeyboardShortcuts() {
   const isLoading = useAppStore((state) => state.ui.isLoading);
   const scannerStatus = useAppStore((state) => state.scannerStatus.status);
   const activeWorkflow = useAppStore((state) => state.ui.activeWorkflow);
+  const hasDocuments = useAppStore((state) => state.documents.length > 0);
 
   const isProcessing =
     currentView === AppView.PROCESSING ||
     isLoading ||
     scannerStatus === ScannerStatus.SCANNING ||
     scannerStatus === ScannerStatus.CHECKING ||
-    (activeWorkflow !== WorkflowType.NONE && useAppStore.getState().documents.length > 0);
+    (activeWorkflow !== WorkflowType.NONE && hasDocuments);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

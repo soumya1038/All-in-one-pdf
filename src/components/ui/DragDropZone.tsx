@@ -63,16 +63,7 @@ function DragDropZone({
     [disabled, onFilesDropped]
   );
 
-  const handleFileInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files.length > 0) {
-        const files = Array.from(e.target.files);
-        onFilesDropped(files);
-        e.target.value = ''; // Reset input
-      }
-    },
-    [onFilesDropped]
-  );
+
 
   const handleClick = async () => {
     if (!disabled) {
@@ -130,15 +121,7 @@ function DragDropZone({
       }}
       aria-label="Upload files"
     >
-      <input
-        id="file-input"
-        type="file"
-        className="hidden"
-        accept={accept.join(',')}
-        multiple={multiple}
-        onChange={handleFileInputChange}
-        disabled={disabled}
-      />
+
 
       <div className="flex flex-col items-center gap-4">
         {getFileTypeIcon()}

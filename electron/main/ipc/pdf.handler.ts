@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, shell } from 'electron';
 import { IpcChannel } from '../../../src/types/IPC.types';
 import { PdfService } from '../services/pdf.service';
 import { FileService } from '../services/file.service';
+import { ErrorCode } from '../../../src/types/Error.types';
 
 const pdfService = new PdfService();
 const fileService = new FileService();
@@ -27,7 +28,7 @@ export function registerPdfHandlers(): void {
     if (!doc || doc.type !== 'PDF') {
       return {
         success: false,
-        error: { code: 'FILE_NOT_FOUND', message: 'PDF not found', recoverable: false },
+        error: { code: ErrorCode.FILE_NOT_FOUND, message: 'PDF not found', recoverable: false },
       };
     }
     return await pdfService.compressFile(doc.tempPath, targetSize);
@@ -39,7 +40,7 @@ export function registerPdfHandlers(): void {
     if (!doc) {
       return {
         success: false,
-        error: { code: 'FILE_NOT_FOUND', message: 'Document not found', recoverable: false },
+        error: { code: ErrorCode.FILE_NOT_FOUND, message: 'Document not found', recoverable: false },
       };
     }
     return await pdfService.convertFile(doc.tempPath, targetFormat);
@@ -51,7 +52,7 @@ export function registerPdfHandlers(): void {
     if (!doc || doc.type !== 'PDF') {
       return {
         success: false,
-        error: { code: 'FILE_NOT_FOUND', message: 'PDF not found', recoverable: false },
+        error: { code: ErrorCode.FILE_NOT_FOUND, message: 'PDF not found', recoverable: false },
       };
     }
     return await pdfService.splitFile(doc.tempPath, splitPoints);
@@ -63,7 +64,7 @@ export function registerPdfHandlers(): void {
     if (!doc || doc.type !== 'PDF') {
       return {
         success: false,
-        error: { code: 'FILE_NOT_FOUND', message: 'PDF not found', recoverable: false },
+        error: { code: ErrorCode.FILE_NOT_FOUND, message: 'PDF not found', recoverable: false },
       };
     }
     return await pdfService.protectFile(doc.tempPath, ownerPassword, userPassword);
@@ -82,7 +83,7 @@ export function registerPdfHandlers(): void {
         return {
           success: false,
           error: {
-            code: 'FILE_NOT_FOUND',
+            code: ErrorCode.FILE_NOT_FOUND,
             message: 'Document not found in session',
             recoverable: false,
           },
@@ -137,7 +138,7 @@ export function registerPdfHandlers(): void {
       return {
         success: false,
         error: {
-          code: 'UNKNOWN_ERROR',
+          code: ErrorCode.UNKNOWN_ERROR,
           message: error instanceof Error ? error.message : 'Failed to open PDF preview',
           recoverable: true,
         },

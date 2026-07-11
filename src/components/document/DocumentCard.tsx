@@ -1,6 +1,6 @@
 import { FileText, Trash2, GripVertical, File } from 'lucide-react';
 import { HTMLAttributes } from 'react';
-import { DocumentItem } from '../../types/Document.types';
+import { DocumentItem, DocumentType } from '../../types/Document.types';
 import { formatFileSize } from '../../utils/formatFileSize';
 
 export interface DocumentCardProps {
@@ -24,17 +24,17 @@ function DocumentCard({
 }: DocumentCardProps) {
   const getTypeIcon = () => {
     switch (document.type) {
-      case 'PDF':
+      case DocumentType.PDF:
         return <FileText size={24} className="text-error" />;
-      case 'IMAGE':
+      case DocumentType.IMAGE:
         return <File size={24} className="text-success" />;
-      case 'WORD':
+      case DocumentType.WORD:
         return <FileText size={24} className="text-accent" />;
-      case 'EXCEL':
+      case DocumentType.EXCEL:
         return <File size={24} className="text-success" />;
-      case 'POWERPOINT':
+      case DocumentType.POWERPOINT:
         return <File size={24} className="text-warning" />;
-      case 'TEXT':
+      case DocumentType.TEXT:
         return <FileText size={24} className="text-text-muted" />;
       default:
         return <File size={24} className="text-text-muted" />;

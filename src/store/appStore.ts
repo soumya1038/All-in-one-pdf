@@ -63,7 +63,7 @@ interface AppState {
  * Default output options
  */
 const defaultOutputOptions: OutputOptions = {
-  filename: `DocuFlow_Output_${new Date().toISOString().split('T')[0]}`,
+  filename: `DocuFlow_Output`,
   format: OutputFormat.PDF,
   targetSize: undefined,
   compress: false,

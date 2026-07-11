@@ -98,7 +98,7 @@ function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-normal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
@@ -106,7 +106,7 @@ function Modal({
     >
       <div
         ref={modalRef}
-        className={`bg-bg-surface rounded-xl shadow-lg w-full ${sizeStyles[size]} animate-in zoom-in-95 duration-normal`}
+        className={`bg-bg-surface rounded-xl shadow-lg w-full ${sizeStyles[size]} animate-scale-in`}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">

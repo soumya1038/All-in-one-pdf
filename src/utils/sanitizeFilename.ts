@@ -32,25 +32,3 @@ export function sanitizeFilename(filename: string): string {
   
   return sanitized;
 }
-
-/**
- * Extract file extension from filename
- * @param filename - Filename with extension
- * @returns Extension including dot (e.g., ".pdf") or empty string
- */
-export function getFileExtension(filename: string): string {
-  const lastDot = filename.lastIndexOf('.');
-  if (lastDot === -1 || lastDot === 0) return '';
-  return filename.substring(lastDot).toLowerCase();
-}
-
-/**
- * Get filename without extension
- * @param filename - Filename with extension
- * @returns Filename without extension
- */
-export function getFilenameWithoutExtension(filename: string): string {
-  const lastDot = filename.lastIndexOf('.');
-  if (lastDot === -1 || lastDot === 0) return filename;
-  return filename.substring(0, lastDot);
-}

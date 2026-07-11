@@ -28,7 +28,7 @@ function ProgressBar({
       )}
       <div className="w-full h-2 bg-bg-sunken rounded-full overflow-hidden">
         <div
-          className="h-full bg-accent transition-all duration-normal ease-default"
+          className="h-full bg-accent transition-all duration-normal"
           style={{ width: `${clampedProgress}%` }}
           role="progressbar"
           aria-valuenow={clampedProgress}

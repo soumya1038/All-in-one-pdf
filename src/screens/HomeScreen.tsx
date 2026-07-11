@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Clock, FolderOpen, X } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 import { WorkflowType } from '../types/UI.types';
@@ -28,15 +28,19 @@ function HomeScreen() {
     loadRecentFiles();
   }, [setRecentFiles]);
 
-  // Clear documents if landing back on Home to ensure a clean session
+  // Clear documents if landing back on Home to ensure a clean session.
+  // Uses a ref to avoid re-triggering when clearDocuments resets the array.
+  const hasCleared = useRef(false);
   useEffect(() => {
-    if (documents.length > 0) {
+    if (!hasCleared.current && documents.length > 0) {
+      hasCleared.current = true;
       for (const doc of documents) {
         window.electron.deleteFile(doc.id).catch(() => {});
       }
       clearDocuments();
     }
-  }, [documents, clearDocuments]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleBrowseClick = async () => {
     try {
@@ -155,46 +159,45 @@ function HomeScreen() {
   return (
     <div className="h-full flex flex-col animate-fade-in">
       {isUploading && <LoadingOverlay message="Uploading files..." />}
- 
-       <div className="flex-1 flex items-center justify-center p-12">
-         <div className="w-full max-w-2xl">
-           {/* Hero Section */}
-           <div className="text-center mb-8">
-             <h1 className="text-2xl font-bold text-text-primary mb-2">
-               {heroTitle}
-             </h1>
-             <p className="text-text-secondary">
-               {heroSubtitle}
-             </p>
-           </div>
- 
-           {/* Upload Zone */}
-           <DragDropZone onFilesDropped={uploadFiles} disabled={isUploading} />
- 
-           {/* Or Browse Button */}
-           <div className="mt-6 flex justify-center gap-3">
-             <Button
-               variant="secondary"
-               size="lg"
-               onClick={handleBrowseClick}
-               disabled={isUploading}
-             >
-               <FolderOpen size={20} />
-               Browse Files
-             </Button>
-             {activeWorkflow !== WorkflowType.NONE && (
-               <Button
-                 variant="ghost"
-                 size="lg"
-                 onClick={() => setActiveWorkflow(WorkflowType.NONE)}
-                 disabled={isUploading}
-               >
-                 <X size={16} className="mr-2" />
-                 Cancel
-               </Button>
-             )}
-           </div>
 
+      <div className="flex-1 flex items-center justify-center p-12">
+        <div className="w-full max-w-2xl">
+          {/* Hero Section */}
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-bold text-text-primary mb-2">
+              {heroTitle}
+            </h1>
+            <p className="text-text-secondary">
+              {heroSubtitle}
+            </p>
+          </div>
+
+          {/* Upload Zone */}
+          <DragDropZone onFilesDropped={uploadFiles} disabled={isUploading} />
+
+          {/* Or Browse Button */}
+          <div className="mt-6 flex justify-center gap-3">
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={handleBrowseClick}
+              disabled={isUploading}
+            >
+              <FolderOpen size={20} />
+              Browse Files
+            </Button>
+            {activeWorkflow !== WorkflowType.NONE && (
+              <Button
+                variant="ghost"
+                size="lg"
+                onClick={() => setActiveWorkflow(WorkflowType.NONE)}
+                disabled={isUploading}
+              >
+                <X size={16} className="mr-2" />
+                Cancel
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

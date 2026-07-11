@@ -119,6 +119,9 @@ function ProcessingScreen() {
     return 'convert';
   };
 
+  // NOTE: Cancel only navigates back to the options screen — it does NOT abort
+  // the running backend IPC call (processOutput). True cancellation would require
+  // an AbortController signal passed through the IPC layer, which is a larger feature.
   const handleCancel = () => setView(AppView.OUTPUT_OPTIONS);
 
   const getStepIcon = (step: ProcessingStep) => {

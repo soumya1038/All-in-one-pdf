@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ArrowLeft, FileText, XCircle, Eye } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
@@ -148,7 +148,7 @@ function OutputScreen() {
     return () => {
       active = false;
     };
-  }, [activeDocIndex, activeDoc, format, documents]);
+  }, [activeDocIndex, activeDoc?.id, format, documents]);
 
   // Keyboard navigation for vertical scroll preview
   useEffect(() => {
@@ -280,7 +280,7 @@ function OutputScreen() {
 
   const { title: headerTitle, desc: headerDesc } = getHeaderContent();
 
-  const PreviewPanel = () => {
+  const previewPanel = useMemo(() => {
     if (!activeDoc && allPreviewPages.length === 0) {
       return (
         <div className="flex-grow flex items-center justify-center text-xs text-text-muted italic select-none">
@@ -355,7 +355,7 @@ function OutputScreen() {
         </div>
       </div>
     );
-  };
+  }, [activeDoc, allPreviewPages, documents, format, activeDocIndex, isLoadingPreview]);
 
   const showFormatSelector = activeWorkflow === WorkflowType.NONE || activeWorkflow === WorkflowType.CONVERT || activeWorkflow === WorkflowType.COMPRESS_IMAGE;
   const showTargetSize = activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE || (activeWorkflow === WorkflowType.NONE && format === OutputFormat.PDF);
@@ -780,7 +780,7 @@ function OutputScreen() {
 
         {/* Right Side: Parallel Live Preview on md+ screens */}
         <div className="hidden md:flex w-[380px] lg:w-[480px] xl:w-[580px] bg-bg-sunken flex-col border-l border-border/40 flex-shrink-0">
-          <PreviewPanel />
+          {previewPanel}
         </div>
       </div>
 
@@ -798,7 +798,7 @@ function OutputScreen() {
               </button>
             </div>
             <div className="flex-1 overflow-hidden bg-bg-sunken flex flex-col min-h-0">
-              <PreviewPanel />
+              {previewPanel}
             </div>
           </div>
         </div>

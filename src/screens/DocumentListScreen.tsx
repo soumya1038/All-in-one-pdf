@@ -183,11 +183,10 @@ function DocumentListScreen() {
         </div>
       </div>
 
-      {/* Footer Actions */}
       <div className="border-t border-border bg-bg-surface p-6 flex-shrink-0">
         <div className="flex items-center justify-end gap-3">
-          <Button variant="secondary" onClick={handleClearAll}>
-            Cancel
+          <Button variant="secondary" onClick={handleBack}>
+            Back
           </Button>
           <Button variant="primary" onClick={handleContinue}>
             Continue to Output Options

@@ -4,6 +4,7 @@ import { useAppStore } from '../../store/appStore';
 import { ModalType, AppView, WorkflowType } from '../../types/UI.types';
 import { OutputFormat } from '../../types/Output.types';
 import { ScannerStatus } from '../../types/Scanner.types';
+import { DocumentType } from '../../types/Document.types';
 
 interface ActionButton {
   icon: React.ReactNode;
@@ -38,7 +39,7 @@ function Sidebar() {
 
   const hasActiveProgress = 
     (currentView === AppView.PDF_COMPOSE && documents.length > 0) ||
-    (currentView === AppView.IMAGE_EDIT && documents.some(d => d.type === 'IMAGE')) ||
+    (currentView === AppView.IMAGE_EDIT && documents.some(d => d.type === DocumentType.IMAGE)) ||
     (activeWorkflow !== WorkflowType.NONE);
 
   const handleActionClick = async (targetView: AppView, targetWorkflow: WorkflowType, label: string, executeAction: () => void) => {
@@ -78,7 +79,7 @@ function Sidebar() {
     // Documents already loaded — validate and proceed
     switch (workflow) {
       case WorkflowType.COMPRESS_IMAGE: {
-        if (documents.length !== 1 || documents[0].type === 'PDF') {
+        if (documents.length !== 1 || documents[0].type === DocumentType.PDF) {
           toast.error('Compress Image requires exactly one image. Remove others/PDFs first.');
           return;
         }
@@ -95,7 +96,7 @@ function Sidebar() {
       }
 
       case WorkflowType.COMPRESS: {
-        if (documents.length !== 1 || documents[0].type !== 'PDF') {
+        if (documents.length !== 1 || documents[0].type !== DocumentType.PDF) {
           toast.error('Compress requires exactly one PDF document. Clear others first.');
           return;
         }
@@ -107,7 +108,7 @@ function Sidebar() {
       }
 
       case WorkflowType.MERGE:
-        if (!documents.every(d => d.type === 'PDF')) {
+        if (!documents.every(d => d.type === DocumentType.PDF)) {
           toast.error('Merge requires all documents to be PDFs. Remove non-PDF files first.');
           return;
         }
@@ -126,7 +127,7 @@ function Sidebar() {
         break;
 
       case WorkflowType.SPLIT:
-        if (documents.length !== 1 || documents[0].type !== 'PDF') {
+        if (documents.length !== 1 || documents[0].type !== DocumentType.PDF) {
           toast.error('Split requires exactly one PDF document.');
           return;
         }
@@ -136,7 +137,7 @@ function Sidebar() {
         break;
 
       case WorkflowType.PROTECT:
-        if (documents.length !== 1 || documents[0].type !== 'PDF') {
+        if (documents.length !== 1 || documents[0].type !== DocumentType.PDF) {
           toast.error('Protect requires exactly one PDF document.');
           return;
         }
