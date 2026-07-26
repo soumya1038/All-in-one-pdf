@@ -174,4 +174,23 @@ export function registerDocumentHandlers(): void {
       };
     }
   });
+
+  /**
+   * Rotate a page in a PDF document
+   */
+  ipcMain.handle(IpcChannel.DOCUMENT_ROTATE_PAGE, async (_, { documentId, pageNumber, direction }) => {
+    try {
+      return await fileService.rotatePage(documentId, pageNumber, direction);
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to rotate PDF page',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  });
 }

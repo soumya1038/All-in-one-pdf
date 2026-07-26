@@ -15,7 +15,7 @@ export interface DragDropZoneProps {
 function DragDropZone({
   onFilesDropped,
   accept = ACCEPTED_EXTENSIONS,
-  multiple = true,
+  multiple: _multiple = true,
   disabled = false,
 }: DragDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);

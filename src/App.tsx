@@ -10,6 +10,8 @@ import SuccessScreen from './screens/SuccessScreen';
 import PreviewScreen from './screens/PreviewScreen';
 import PdfComposeScreen from './screens/PdfComposeScreen';
 import ImageEditScreen from './screens/ImageEditScreen';
+import CanvasEditorScreen from './screens/CanvasEditorScreen';
+import OcrScreen from './screens/OcrScreen';
 import ScannerModal from './components/scanner/ScannerModal';
 import DocumentPreviewModal from './components/document/DocumentPreviewModal';
 import AddMoreModal from './components/document/AddMoreModal';
@@ -39,6 +41,10 @@ function App() {
         return <PdfComposeScreen />;
       case AppView.IMAGE_EDIT:
         return <ImageEditScreen />;
+      case AppView.CANVAS_EDITOR:
+        return <CanvasEditorScreen />;
+      case AppView.OCR:
+        return <OcrScreen />;
       default:
         return <HomeScreen />;
     }

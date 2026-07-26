@@ -78,6 +78,8 @@ const api: IpcApi = {
 
   reorderPages: (documentId, newPageOrder) =>
     ipcRenderer.invoke(IpcChannel.DOCUMENT_REORDER_PAGES, { documentId, newPageOrder }),
+  rotatePage: (documentId, pageNumber, direction) =>
+    ipcRenderer.invoke(IpcChannel.DOCUMENT_ROTATE_PAGE, { documentId, pageNumber, direction }),
 
   // System operations
   getRecentFiles: () =>

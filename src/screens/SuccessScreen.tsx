@@ -1,4 +1,4 @@
-import { CheckCircle2, FolderOpen, FileText, Home, Minimize, Scissors, Lock, ArrowRightLeft, Camera, Layout } from 'lucide-react';
+import { CheckCircle2, FolderOpen, FileText, Home, Minimize, Scissors, Lock, ArrowRightLeft, Camera, Layout, Pencil } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
 import { AppView, WorkflowType } from '../types/UI.types';
@@ -56,7 +56,7 @@ function SuccessScreen() {
     setView(AppView.HOME);
   };
 
-  const handleUseFile = async (targetWorkflow: WorkflowType | 'PDF_COMPOSE' | 'IMAGE_EDIT') => {
+  const handleUseFile = async (targetWorkflow: WorkflowType | 'PDF_COMPOSE' | 'IMAGE_EDIT' | 'CANVAS_EDITOR') => {
     if (!outputPath) return;
     
     const loadingToastId = toast.loading('Loading file into new session...');
@@ -64,75 +64,82 @@ function SuccessScreen() {
     try {
       // 1. Upload/import the file so the backend creates a proper DocumentItem in temp dir
       const result = await window.electron.uploadFiles([outputPath]);
-      if (result.success && result.data.length > 0) {
-        toast.dismiss(loadingToastId);
-        
-        // 2. Clear old session documents
-        for (const doc of documents) {
-          await window.electron.deleteFile(doc.id).catch(() => {});
-        }
-        clearDocuments();
-        
-        // 3. Add the new imported document to the store
-        const importedDoc = result.data[0];
-        useAppStore.getState().addDocuments([importedDoc]);
-        
-        // 4. Navigate and set options based on the chosen shortcut
-        const fileBaseName = importedDoc.filename.substring(0, importedDoc.filename.lastIndexOf('.')) || importedDoc.filename;
-        
-        if (targetWorkflow === 'PDF_COMPOSE') {
-          setView(AppView.PDF_COMPOSE);
-        } else if (targetWorkflow === 'IMAGE_EDIT') {
-          setView(AppView.IMAGE_EDIT);
-        } else {
-          setActiveWorkflow(targetWorkflow as WorkflowType);
+      if (result.success) {
+        if (result.data.length > 0) {
+          toast.dismiss(loadingToastId);
           
-          if (targetWorkflow === WorkflowType.COMPRESS) {
-            useAppStore.getState().updateOutputOptions({
-              format: OutputFormat.PDF,
-              compress: true,
-              filename: `${fileBaseName}_compressed`
-            });
-            setView(AppView.OUTPUT_OPTIONS);
-          } else if (targetWorkflow === WorkflowType.COMPRESS_IMAGE) {
-            const ext = importedDoc.filename.toLowerCase();
-            let format = OutputFormat.JPEG;
-            if (ext.endsWith('.png')) format = OutputFormat.PNG;
-            else if (ext.endsWith('.tiff') || ext.endsWith('.tif')) format = OutputFormat.TIFF;
-            
-            useAppStore.getState().updateOutputOptions({
-              format,
-              compress: true,
-              filename: `${fileBaseName}_compressed`
-            });
-            setView(AppView.OUTPUT_OPTIONS);
-          } else if (targetWorkflow === WorkflowType.PROTECT) {
-            useAppStore.getState().updateOutputOptions({
-              format: OutputFormat.PDF,
-              protection: { enabled: true },
-              filename: `${fileBaseName}_protected`
-            });
-            setView(AppView.OUTPUT_OPTIONS);
-          } else if (targetWorkflow === WorkflowType.CONVERT) {
-            useAppStore.getState().updateOutputOptions({
-              filename: `${fileBaseName}_converted`
-            });
-            setView(AppView.OUTPUT_OPTIONS);
-          } else if (targetWorkflow === WorkflowType.SPLIT) {
-            useAppStore.getState().updateOutputOptions({
-              format: OutputFormat.PDF,
-              filename: `${fileBaseName}_split`
-            });
-            setView(AppView.OUTPUT_OPTIONS);
-          } else {
-            setView(AppView.DOCUMENT_LIST);
+          // 2. Clear old session documents
+          for (const doc of documents) {
+            await window.electron.deleteFile(doc.id).catch(() => {});
           }
+          clearDocuments();
+          
+          // 3. Add the new imported document to the store
+          const importedDoc = result.data[0];
+          useAppStore.getState().addDocuments([importedDoc]);
+          
+          // 4. Navigate and set options based on the chosen shortcut
+          const fileBaseName = importedDoc.filename.substring(0, importedDoc.filename.lastIndexOf('.')) || importedDoc.filename;
+          
+          if (targetWorkflow === 'PDF_COMPOSE') {
+            setView(AppView.PDF_COMPOSE);
+          } else if (targetWorkflow === 'IMAGE_EDIT') {
+            setView(AppView.IMAGE_EDIT);
+          } else if (targetWorkflow === 'CANVAS_EDITOR') {
+            setView(AppView.CANVAS_EDITOR);
+          } else {
+            setActiveWorkflow(targetWorkflow as WorkflowType);
+            
+            if (targetWorkflow === WorkflowType.COMPRESS) {
+              useAppStore.getState().updateOutputOptions({
+                format: OutputFormat.PDF,
+                compress: true,
+                filename: `${fileBaseName}_compressed`
+              });
+              setView(AppView.OUTPUT_OPTIONS);
+            } else if (targetWorkflow === WorkflowType.COMPRESS_IMAGE) {
+              const ext = importedDoc.filename.toLowerCase();
+              let format = OutputFormat.JPEG;
+              if (ext.endsWith('.png')) format = OutputFormat.PNG;
+              else if (ext.endsWith('.tiff') || ext.endsWith('.tif')) format = OutputFormat.TIFF;
+              
+              useAppStore.getState().updateOutputOptions({
+                format,
+                compress: true,
+                filename: `${fileBaseName}_compressed`
+              });
+              setView(AppView.OUTPUT_OPTIONS);
+            } else if (targetWorkflow === WorkflowType.PROTECT) {
+              useAppStore.getState().updateOutputOptions({
+                format: OutputFormat.PDF,
+                protection: { enabled: true },
+                filename: `${fileBaseName}_protected`
+              });
+              setView(AppView.OUTPUT_OPTIONS);
+            } else if (targetWorkflow === WorkflowType.CONVERT) {
+              useAppStore.getState().updateOutputOptions({
+                filename: `${fileBaseName}_converted`
+              });
+              setView(AppView.OUTPUT_OPTIONS);
+            } else if (targetWorkflow === WorkflowType.SPLIT) {
+              useAppStore.getState().updateOutputOptions({
+                format: OutputFormat.PDF,
+                filename: `${fileBaseName}_split`
+              });
+              setView(AppView.OUTPUT_OPTIONS);
+            } else {
+              setView(AppView.DOCUMENT_LIST);
+            }
+          }
+          
+          toast.success('Started editing file in new session');
+        } else {
+          toast.dismiss(loadingToastId);
+          toast.error('Failed to import: No files loaded.');
         }
-        
-        toast.success('Started editing file in new session');
       } else {
         toast.dismiss(loadingToastId);
-        toast.error('Failed to import file: ' + (result?.error?.message || 'Unknown error'));
+        toast.error('Failed to import file: ' + (result.error?.message || 'Unknown error'));
       }
     } catch (err) {
       toast.dismiss(loadingToastId);
@@ -318,6 +325,15 @@ function SuccessScreen() {
                           >
                             <Layout size={16} />
                             PDF Compose
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => handleUseFile('CANVAS_EDITOR')}
+                            className="flex items-center justify-center gap-2 font-medium"
+                          >
+                            <Pencil size={16} />
+                            Image Editor
                           </Button>
                         </>
                       )}

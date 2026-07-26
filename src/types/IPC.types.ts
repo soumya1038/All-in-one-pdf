@@ -36,6 +36,7 @@ export enum IpcChannel {
   DOCUMENT_ADD_PAGE = 'docuflow:document:addPage',
   DOCUMENT_RENDER_PDF_PAGE_THUMBNAIL = 'docuflow:document:renderPdfPageThumbnail',
   DOCUMENT_REORDER_PAGES = 'docuflow:document:reorderPages',
+  DOCUMENT_ROTATE_PAGE = 'docuflow:document:rotatePage',
   
   // Output operations
   OUTPUT_PROCESS = 'docuflow:output:process',
@@ -198,6 +199,7 @@ export interface IpcApi {
   addPage: (documentId: string, pageNumber: number, sourceFilePath?: string) => Promise<Result<DocumentItem>>;
   renderPdfPageThumbnail: (documentId: string, pageNumber: number) => Promise<Result<string>>;
   reorderPages: (documentId: string, newPageOrder: number[]) => Promise<Result<DocumentItem>>;
+  rotatePage: (documentId: string, pageNumber: number, direction: 'cw' | 'ccw') => Promise<Result<DocumentItem>>;
   
   // System operations
   getRecentFiles: () => Promise<Result<RecentFile[]>>;

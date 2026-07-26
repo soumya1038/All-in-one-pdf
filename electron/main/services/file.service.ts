@@ -794,6 +794,117 @@ export class FileService {
   }
 
   /**
+   * Rotate a page in a PDF document
+   */
+  async rotatePage(id: string, pageNumber: number, direction: 'cw' | 'ccw'): Promise<Result<DocumentItem>> {
+    try {
+      const document = FileService.documents.get(id);
+      if (!document) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.FILE_NOT_FOUND,
+            message: 'Document not found',
+            recoverable: false,
+          },
+        };
+      }
+
+      if (document.type !== DocumentType.PDF) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: 'Document is not a PDF',
+            recoverable: false,
+          },
+        };
+      }
+
+      const oldTempPath = document.tempPath;
+      const oldThumbnailPath = document.thumbnailPath;
+
+      const { PDFDocument, degrees } = await import('pdf-lib');
+      const currentPdfBytes = await readFile(oldTempPath);
+      const pdfDoc = await PDFDocument.load(currentPdfBytes, { ignoreEncryption: true });
+
+      if (pageNumber < 1 || pageNumber > pdfDoc.getPageCount()) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCode.UNKNOWN_ERROR,
+            message: `Invalid page number: ${pageNumber}`,
+            recoverable: false,
+          },
+        };
+      }
+
+      const page = pdfDoc.getPage(pageNumber - 1);
+      const rot = page.getRotation();
+      const currentRotation = typeof rot === 'number' ? rot : (rot.angle || 0);
+
+      let newRotation = 0;
+      if (direction === 'cw') {
+        newRotation = (currentRotation + 90) % 360;
+      } else {
+        newRotation = (currentRotation - 90 + 360) % 360;
+      }
+
+      page.setRotation(degrees(newRotation));
+
+      const pdfBytes = await pdfDoc.save();
+      const finalBuffer = Buffer.from(pdfBytes);
+
+      const newId = uuidv4();
+      const sanitized = sanitizeFilename(basename(document.filename));
+      const newTempPath = getTempFilePath(`${newId}_${sanitized}`);
+
+      await writeFile(newTempPath, finalBuffer);
+
+      // Re-generate thumbnail
+      const newThumbnailPath = await this.createThumbnail(newTempPath, newId, document.type);
+
+      // Invalidate clean cache path for the rotated page since it has changed orientation
+      if (document.cleanTempPaths && document.cleanTempPaths[pageNumber]) {
+        const cleanPath = document.cleanTempPaths[pageNumber];
+        delete document.cleanTempPaths[pageNumber];
+        unlink(cleanPath).catch(() => {});
+      }
+
+      document.tempPath = newTempPath;
+      if (newThumbnailPath) {
+        document.thumbnailPath = newThumbnailPath;
+      }
+
+      const fileStats = await stat(newTempPath);
+      document.size = fileStats.size;
+      document.pageCount = await this.getPdfPageCount(newTempPath);
+
+      // Clean up old files
+      unlink(oldTempPath).catch(() => {});
+      if (oldThumbnailPath) {
+        unlink(oldThumbnailPath).catch(() => {});
+      }
+
+      return {
+        success: true,
+        data: document,
+      };
+    } catch (error) {
+      console.error('Failed to rotate page:', error);
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to rotate PDF page',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  }
+
+  /**
    * Get document by ID
    */
   getDocument(id: string): DocumentItem | undefined {

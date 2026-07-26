@@ -1,4 +1,4 @@
-import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage, Layout, Camera } from 'lucide-react';
+import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage, Layout, Camera, Pencil, FileText } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../../store/appStore';
 import { ModalType, AppView, WorkflowType } from '../../types/UI.types';
@@ -40,6 +40,7 @@ function Sidebar() {
   const hasActiveProgress = 
     (currentView === AppView.PDF_COMPOSE && documents.length > 0) ||
     (currentView === AppView.IMAGE_EDIT && documents.some(d => d.type === DocumentType.IMAGE)) ||
+    (currentView === AppView.CANVAS_EDITOR) ||
     (activeWorkflow !== WorkflowType.NONE);
 
   const handleActionClick = async (targetView: AppView, targetWorkflow: WorkflowType, label: string, executeAction: () => void) => {
@@ -193,6 +194,16 @@ function Sidebar() {
       icon: <Camera size={20} />,
       label: 'Passport Photo',
       action: () => handleActionClick(AppView.IMAGE_EDIT, WorkflowType.NONE, 'Passport Photo', () => setView(AppView.IMAGE_EDIT)),
+    },
+    {
+      icon: <Pencil size={20} />,
+      label: 'Image Editor',
+      action: () => handleActionClick(AppView.CANVAS_EDITOR, WorkflowType.NONE, 'Image Editor', () => setView(AppView.CANVAS_EDITOR)),
+    },
+    {
+      icon: <FileText size={20} />,
+      label: 'Offline OCR',
+      action: () => handleActionClick(AppView.OCR, WorkflowType.NONE, 'Offline OCR', () => setView(AppView.OCR)),
     },
   ];
 

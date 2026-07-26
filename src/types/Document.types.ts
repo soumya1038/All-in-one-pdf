@@ -29,6 +29,7 @@ export interface PlacedSignature {
   height: number; // percentage (0-100)
   imgSrc: string; // Base64 image data URL
   page: number;   // 1-indexed page number
+  rotation?: number; // rotation angle in degrees (0-360)
 }
 
 export interface DocumentItem {

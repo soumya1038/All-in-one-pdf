@@ -406,6 +406,22 @@ export class OutputService {
         };
       }
 
+      // Apply watermark if requested
+      if (options.watermark && options.watermark.enabled) {
+        if (finalTempPath === documents[0].tempPath) {
+          const tempCopyPath = getTempFilePath(`watermark_temp_single_${Date.now()}.pdf`);
+          await copyFile(documents[0].tempPath, tempCopyPath);
+          finalTempPath = tempCopyPath;
+        }
+        const watermarkResult = await this.pdfService.applyWatermark(finalTempPath, options.watermark);
+        if (!watermarkResult.success) {
+          return {
+            success: false,
+            error: watermarkResult.error,
+          };
+        }
+      }
+
       // 5. Final Save — copy temp → user destination
       await copyFile(finalTempPath, outputPath);
 
@@ -519,6 +535,24 @@ export class OutputService {
 
         const baseName = this.getOutputBaseName(document.filename);
         const finalPath = join(outputFolder, `${baseName}_${index + 1}.pdf`);
+
+        // Apply watermark if requested
+        if (options.watermark && options.watermark.enabled) {
+          if (workingPath === document.tempPath) {
+            const tempCopyPath = getTempFilePath(`watermark_temp_batch_${document.id}_${Date.now()}.pdf`);
+            await copyFile(document.tempPath, tempCopyPath);
+            workingPath = tempCopyPath;
+            tempPathsToClean.push(tempCopyPath);
+          }
+          const watermarkResult = await this.pdfService.applyWatermark(workingPath, options.watermark);
+          if (!watermarkResult.success) {
+            return {
+              success: false,
+              error: watermarkResult.error,
+            };
+          }
+        }
+
         await copyFile(workingPath, finalPath);
         outputPaths.push(finalPath);
         outputSize += await this.getFileSize(finalPath);

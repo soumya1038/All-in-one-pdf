@@ -5,9 +5,16 @@ import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import { 
   Printer, Crop, ShieldAlert, Sparkles, 
-  RotateCcw, RotateCw, Sliders, Check, X
+  RotateCcw, RotateCw, Sliders, Check, X, ZoomIn, ZoomOut
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+
+declare global {
+  interface Window {
+    cv: any;
+    Module: any;
+  }
+}
 
 enum EditTab {
   FILTERS = 'FILTERS',
@@ -189,6 +196,66 @@ function DocumentPreviewModal() {
     br: { x: 90, y: 90 }
   });
 
+  // Custom Crop Dimensions State
+  const [customCropWidth, setCustomCropWidth] = useState<string>('');
+  const [customCropHeight, setCustomCropHeight] = useState<string>('');
+  const [customCropUnit, setCustomCropUnit] = useState<'px' | 'mm' | 'cm' | 'in'>('px');
+
+  const applyCustomCropDimensions = (
+    widthStr?: string,
+    heightStr?: string,
+    unitStr?: 'px' | 'mm' | 'cm' | 'in'
+  ) => {
+    const wVal = parseFloat(widthStr !== undefined ? widthStr : customCropWidth);
+    const hVal = parseFloat(heightStr !== undefined ? heightStr : customCropHeight);
+    const unit = unitStr || customCropUnit;
+
+    if (isNaN(wVal) || isNaN(hVal) || wVal <= 0 || hVal <= 0) {
+      toast.error('Please enter valid width and height numbers.');
+      return;
+    }
+
+    const img = editedImageRef.current || originalImageRef.current;
+    const imgWidth = img ? (img instanceof HTMLImageElement ? img.naturalWidth || img.width : img.width) : 1000;
+    const imgHeight = img ? (img instanceof HTMLImageElement ? img.naturalHeight || img.height : img.height) : 1000;
+
+    const dpi = 300;
+    let targetWpx = wVal;
+    let targetHpx = hVal;
+
+    if (unit === 'cm') {
+      targetWpx = (wVal * dpi) / 2.54;
+      targetHpx = (hVal * dpi) / 2.54;
+    } else if (unit === 'mm') {
+      targetWpx = (wVal * dpi) / 25.4;
+      targetHpx = (hVal * dpi) / 25.4;
+    } else if (unit === 'in') {
+      targetWpx = wVal * dpi;
+      targetHpx = hVal * dpi;
+    }
+
+    let pctW = (targetWpx / imgWidth) * 100;
+    let pctH = (targetHpx / imgHeight) * 100;
+
+    if (pctW > 90 || pctH > 90) {
+      const scaleFactor = Math.min(85 / pctW, 85 / pctH);
+      pctW *= scaleFactor;
+      pctH *= scaleFactor;
+    }
+
+    const left = Math.max(0, (100 - pctW) / 2);
+    const top = Math.max(0, (100 - pctH) / 2);
+
+    setCropBox({
+      tl: { x: left, y: top },
+      tr: { x: Math.min(100, left + pctW), y: top },
+      bl: { x: left, y: Math.min(100, top + pctH) },
+      br: { x: Math.min(100, left + pctW), y: Math.min(100, top + pctH) }
+    });
+
+    toast.success(`Crop box updated to ${wVal} × ${hVal} ${unit}`);
+  };
+
   // OpenCV corner detection state
   const [cvStatus, setCvStatus] = useState<'unloaded' | 'loading' | 'loaded' | 'error'>('unloaded');
   const [hasAutoDetected, setHasAutoDetected] = useState(false);
@@ -208,6 +275,59 @@ function DocumentPreviewModal() {
 
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [dragType, setDragType] = useState<string | null>(null); // 'tl', 'tr', 'bl', 'br', 'sigMove', 'sigResize'
+
+  // Zoom & Pan states for editor workspace (CTRL + Scroll Wheel & Canvas Drag)
+  const [zoomScale, setZoomScale] = useState<number>(1.0);
+  const [panPosition, setPanPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  // Spacebar pan mode detection
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        setIsSpacePressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // Reset zoom & pan on exiting editing
+  useEffect(() => {
+    if (!isEditing) {
+      setZoomScale(1.0);
+      setPanPosition({ x: 0, y: 0 });
+    }
+  }, [isEditing]);
+
+  // Non-passive Ctrl + Wheel listener for smooth canvas zoom
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !isEditing) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.15 : -0.15;
+        setZoomScale((prev) => parseFloat(Math.min(4.0, Math.max(0.5, prev + delta)).toFixed(2)));
+      }
+    };
+
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', onWheel);
+    };
+  }, [isEditing]);
 
   // Image load & setup
   useEffect(() => {
@@ -883,8 +1003,12 @@ function DocumentPreviewModal() {
   const handleMouseDown = (e: React.MouseEvent, type: string) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Force canvasPan if Spacebar is held or Middle Click (button 1) is pressed
+    const actualType = (isSpacePressed || e.button === 1) ? 'canvasPan' : type;
+
     setDragStart({ x: e.clientX, y: e.clientY });
-    setDragType(type);
+    setDragType(actualType);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -894,7 +1018,14 @@ function DocumentPreviewModal() {
     const deltaX = ((e.clientX - dragStart.x) / containerRect.width) * 100;
     const deltaY = ((e.clientY - dragStart.y) / containerRect.height) * 100;
 
-    if (dragType === 'sigMove') {
+    if (dragType === 'canvasPan') {
+      const deltaPxX = e.clientX - dragStart.x;
+      const deltaPxY = e.clientY - dragStart.y;
+      setPanPosition((prev) => ({
+        x: prev.x + deltaPxX,
+        y: prev.y + deltaPxY
+      }));
+    } else if (dragType === 'sigMove') {
       setSigPosition((prev) => ({
         ...prev,
         x: Math.max(0, Math.min(100 - prev.width, prev.x + deltaX)),
@@ -913,6 +1044,45 @@ function DocumentPreviewModal() {
         ...prev,
         [dragType]: { x: newX, y: newY }
       }));
+    } else if (dragType === 'cropMove') {
+      setCropBox((prev) => {
+        const minX = Math.min(prev.tl.x, prev.tr.x, prev.bl.x, prev.br.x);
+        const maxX = Math.max(prev.tl.x, prev.tr.x, prev.bl.x, prev.br.x);
+        const minY = Math.min(prev.tl.y, prev.tr.y, prev.bl.y, prev.br.y);
+        const maxY = Math.max(prev.tl.y, prev.tr.y, prev.bl.y, prev.br.y);
+
+        const boundedDeltaX = Math.max(-minX, Math.min(100 - maxX, deltaX));
+        const boundedDeltaY = Math.max(-minY, Math.min(100 - maxY, deltaY));
+
+        return {
+          tl: { x: prev.tl.x + boundedDeltaX, y: prev.tl.y + boundedDeltaY },
+          tr: { x: prev.tr.x + boundedDeltaX, y: prev.tr.y + boundedDeltaY },
+          bl: { x: prev.bl.x + boundedDeltaX, y: prev.bl.y + boundedDeltaY },
+          br: { x: prev.br.x + boundedDeltaX, y: prev.br.y + boundedDeltaY }
+        };
+      });
+    } else if (['edge-top', 'edge-right', 'edge-bottom', 'edge-left'].includes(dragType)) {
+      setCropBox((prev) => {
+        const updated = { ...prev };
+        if (dragType === 'edge-top') {
+          const newY = Math.max(0, Math.min(Math.min(prev.bl.y, prev.br.y) - 1, prev.tl.y + deltaY));
+          updated.tl = { x: prev.tl.x, y: newY };
+          updated.tr = { x: prev.tr.x, y: newY };
+        } else if (dragType === 'edge-right') {
+          const newX = Math.min(100, Math.max(Math.max(prev.tl.x, prev.bl.x) + 1, prev.tr.x + deltaX));
+          updated.tr = { x: newX, y: prev.tr.y };
+          updated.br = { x: newX, y: prev.br.y };
+        } else if (dragType === 'edge-bottom') {
+          const newY = Math.min(100, Math.max(Math.max(prev.tl.y, prev.tr.y) + 1, prev.bl.y + deltaY));
+          updated.bl = { x: prev.bl.x, y: newY };
+          updated.br = { x: prev.br.x, y: newY };
+        } else if (dragType === 'edge-left') {
+          const newX = Math.max(0, Math.min(Math.min(prev.tr.x, prev.br.x) - 1, prev.tl.x + deltaX));
+          updated.tl = { x: newX, y: prev.tl.y };
+          updated.bl = { x: newX, y: prev.bl.y };
+        }
+        return updated;
+      });
     }
 
     setDragStart({ x: e.clientX, y: e.clientY });
@@ -942,7 +1112,7 @@ function DocumentPreviewModal() {
         <div className="flex flex-col md:flex-row gap-6 items-stretch">
           
           {/* Document Content View / Canvas Editor */}
-          <div className="flex-1 flex justify-center items-center bg-bg-sunken rounded-xl p-4 min-h-[380px] max-h-[500px] border border-border relative overflow-hidden select-none">
+          <div className="flex-1 flex justify-center items-center bg-bg-sunken rounded-xl p-1 min-h-[380px] max-h-[500px] border border-border relative overflow-hidden select-none">
             {!isEditing ? (
               doc.type === 'PDF' ? (
                 // PDF native viewer iframe using docuflow custom protocol
@@ -961,46 +1131,194 @@ function DocumentPreviewModal() {
               )
             ) : (
               // Edit Mode Canvas + Overlays
-              <div 
-                ref={containerRef}
-                className="relative max-w-full max-h-[460px] flex items-center justify-center"
+              <div
+                className={`relative w-full h-full flex items-center justify-center overflow-hidden ${(zoomScale > 1.0 || isSpacePressed) ? (dragType === 'canvasPan' ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+                onMouseDown={(e) => {
+                  if (isSpacePressed || e.button === 1 || zoomScale > 1.0) {
+                    handleMouseDown(e, 'canvasPan');
+                  }
+                }}
               >
-                <canvas 
-                  ref={canvasRef} 
-                  className="max-w-full max-h-[460px] object-contain rounded-lg shadow-md bg-white"
-                />
+                {/* Floating Zoom Controls Badge */}
+                <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5 bg-bg-surface/90 backdrop-blur-md border border-border px-2.5 py-1 rounded-full shadow-md text-xs font-semibold text-text-primary select-none">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = Math.max(0.5, parseFloat((zoomScale - 0.2).toFixed(2)));
+                      setZoomScale(next);
+                      if (next === 1.0) setPanPosition({ x: 0, y: 0 });
+                    }}
+                    className="p-0.5 rounded hover:bg-bg-sunken text-text-secondary hover:text-text-primary transition-colors"
+                    title="Zoom Out (Ctrl + Scroll Down)"
+                  >
+                    <ZoomOut size={14} />
+                  </button>
+                  <span className="font-mono text-[11px] min-w-[36px] text-center">
+                    {Math.round(zoomScale * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setZoomScale((prev) => Math.min(4.0, parseFloat((prev + 0.2).toFixed(2))))}
+                    className="p-0.5 rounded hover:bg-bg-sunken text-text-secondary hover:text-text-primary transition-colors"
+                    title="Zoom In (Ctrl + Scroll Up)"
+                  >
+                    <ZoomIn size={14} />
+                  </button>
+                  {(panPosition.x !== 0 || panPosition.y !== 0) && (
+                    <button
+                      type="button"
+                      onClick={() => setPanPosition({ x: 0, y: 0 })}
+                      className="ml-1 text-[10px] text-accent hover:underline font-medium"
+                      title="Center Image View"
+                    >
+                      Center
+                    </button>
+                  )}
+                  {(zoomScale !== 1.0 || panPosition.x !== 0 || panPosition.y !== 0) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setZoomScale(1.0);
+                        setPanPosition({ x: 0, y: 0 });
+                      }}
+                      className="ml-1 text-[10px] text-accent hover:underline font-medium"
+                      title="Reset Zoom & View"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+
+                <div 
+                  ref={containerRef}
+                  className="relative select-none transition-transform duration-75 flex items-center justify-center max-w-full max-h-full"
+                  style={{
+                    transform: `translate(${panPosition.x}px, ${panPosition.y}px) scale(${zoomScale})`,
+                    transformOrigin: 'center center'
+                  }}
+                >
+                  <canvas 
+                    ref={canvasRef} 
+                    className={`max-w-full max-h-full object-contain rounded-lg shadow-md bg-white block ${(zoomScale > 1.0 || isSpacePressed) ? (dragType === 'canvasPan' ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+                    onMouseDown={(e) => {
+                      if (isSpacePressed || e.button === 1 || zoomScale > 1.0) {
+                        handleMouseDown(e, 'canvasPan');
+                      }
+                    }}
+                  />
                 
                 {/* Perspective Crop Overlay */}
                 {activeTab === EditTab.CROP && (
                   <div className="absolute inset-0 w-full h-full">
                     {/* SVG Connector lines */}
-                    <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
+                    <svg
+                      className="absolute inset-0 w-full h-full z-10"
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                      style={{ pointerEvents: 'none' }}
+                    >
                       <polygon
-                        points={`${cropBox.tl.x}%,${cropBox.tl.y}% ${cropBox.tr.x}%,${cropBox.tr.y}% ${cropBox.br.x}%,${cropBox.br.y}% ${cropBox.bl.x}%,${cropBox.bl.y}%`}
-                        className="stroke-accent stroke-2 fill-accent/10"
+                        points={`${cropBox.tl.x},${cropBox.tl.y} ${cropBox.tr.x},${cropBox.tr.y} ${cropBox.br.x},${cropBox.br.y} ${cropBox.bl.x},${cropBox.bl.y}`}
+                        className={`stroke-accent stroke-[0.4] fill-accent/15 hover:fill-accent/30 transition-colors duration-normal ${dragType === 'cropMove' ? 'cursor-grabbing' : 'cursor-grab'}`}
+                        style={{ pointerEvents: 'auto' }}
+                        onMouseDown={(e) => handleMouseDown(e, 'cropMove')}
+                      />
+                      {/* Top Edge (tl to tr) - Vertical Movement */}
+                      <line
+                        x1={cropBox.tl.x}
+                        y1={cropBox.tl.y}
+                        x2={cropBox.tr.x}
+                        y2={cropBox.tr.y}
+                        className="stroke-accent/0 hover:stroke-accent/40 cursor-ns-resize transition-colors duration-normal"
+                        strokeWidth="3"
+                        style={{ pointerEvents: 'auto' }}
+                        onMouseDown={(e) => handleMouseDown(e, 'edge-top')}
+                      />
+                      {/* Right Edge (tr to br) - Horizontal Movement */}
+                      <line
+                        x1={cropBox.tr.x}
+                        y1={cropBox.tr.y}
+                        x2={cropBox.br.x}
+                        y2={cropBox.br.y}
+                        className="stroke-accent/0 hover:stroke-accent/40 cursor-ew-resize transition-colors duration-normal"
+                        strokeWidth="3"
+                        style={{ pointerEvents: 'auto' }}
+                        onMouseDown={(e) => handleMouseDown(e, 'edge-right')}
+                      />
+                      {/* Bottom Edge (bl to br) - Vertical Movement */}
+                      <line
+                        x1={cropBox.bl.x}
+                        y1={cropBox.bl.y}
+                        x2={cropBox.br.x}
+                        y2={cropBox.br.y}
+                        className="stroke-accent/0 hover:stroke-accent/40 cursor-ns-resize transition-colors duration-normal"
+                        strokeWidth="3"
+                        style={{ pointerEvents: 'auto' }}
+                        onMouseDown={(e) => handleMouseDown(e, 'edge-bottom')}
+                      />
+                      {/* Left Edge (tl to bl) - Horizontal Movement */}
+                      <line
+                        x1={cropBox.tl.x}
+                        y1={cropBox.tl.y}
+                        x2={cropBox.bl.x}
+                        y2={cropBox.bl.y}
+                        className="stroke-accent/0 hover:stroke-accent/40 cursor-ew-resize transition-colors duration-normal"
+                        strokeWidth="3"
+                        style={{ pointerEvents: 'auto' }}
+                        onMouseDown={(e) => handleMouseDown(e, 'edge-left')}
                       />
                     </svg>
                     
-                    {/* Corner Handles */}
+                    {/* Draggable Corner Handles */}
                     <div 
-                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20"
+                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                       style={{ left: `${cropBox.tl.x}%`, top: `${cropBox.tl.y}%` }}
                       onMouseDown={(e) => handleMouseDown(e, 'tl')}
+                      title="Top-Left Corner"
                     />
                     <div 
-                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20"
+                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                       style={{ left: `${cropBox.tr.x}%`, top: `${cropBox.tr.y}%` }}
                       onMouseDown={(e) => handleMouseDown(e, 'tr')}
+                      title="Top-Right Corner"
                     />
                     <div 
-                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20"
+                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                       style={{ left: `${cropBox.bl.x}%`, top: `${cropBox.bl.y}%` }}
                       onMouseDown={(e) => handleMouseDown(e, 'bl')}
+                      title="Bottom-Left Corner"
                     />
                     <div 
-                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20"
+                      className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                       style={{ left: `${cropBox.br.x}%`, top: `${cropBox.br.y}%` }}
                       onMouseDown={(e) => handleMouseDown(e, 'br')}
+                      title="Bottom-Right Corner"
+                    />
+
+                    {/* Draggable Middle Edge Handles */}
+                    <div
+                      className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full cursor-ns-resize -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
+                      style={{ left: `${(cropBox.tl.x + cropBox.tr.x) / 2}%`, top: `${(cropBox.tl.y + cropBox.tr.y) / 2}%` }}
+                      onMouseDown={(e) => handleMouseDown(e, 'edge-top')}
+                      title="Drag Top Edge (Vertical Only)"
+                    />
+                    <div
+                      className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full cursor-ew-resize -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
+                      style={{ left: `${(cropBox.tr.x + cropBox.br.x) / 2}%`, top: `${(cropBox.tr.y + cropBox.br.y) / 2}%` }}
+                      onMouseDown={(e) => handleMouseDown(e, 'edge-right')}
+                      title="Drag Right Edge (Horizontal Only)"
+                    />
+                    <div
+                      className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full cursor-ns-resize -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
+                      style={{ left: `${(cropBox.bl.x + cropBox.br.x) / 2}%`, top: `${(cropBox.bl.y + cropBox.br.y) / 2}%` }}
+                      onMouseDown={(e) => handleMouseDown(e, 'edge-bottom')}
+                      title="Drag Bottom Edge (Vertical Only)"
+                    />
+                    <div
+                      className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full cursor-ew-resize -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
+                      style={{ left: `${(cropBox.tl.x + cropBox.bl.x) / 2}%`, top: `${(cropBox.tl.y + cropBox.bl.y) / 2}%` }}
+                      onMouseDown={(e) => handleMouseDown(e, 'edge-left')}
+                      title="Drag Left Edge (Horizontal Only)"
                     />
                   </div>
                 )}
@@ -1008,7 +1326,7 @@ function DocumentPreviewModal() {
                 {/* Floating Resizable Signature Overlay */}
                 {activeTab === EditTab.SIGNATURE && signatureImage && (
                   <div
-                    className="absolute border border-dashed border-accent bg-accent/5 cursor-move z-10"
+                    className={`absolute border border-dashed border-accent bg-accent/5 z-10 ${dragType === 'sigMove' ? 'cursor-grabbing' : 'cursor-grab'}`}
                     style={{
                       left: `${sigPosition.x}%`,
                       top: `${sigPosition.y}%`,
@@ -1041,7 +1359,8 @@ function DocumentPreviewModal() {
                   </div>
                 )}
               </div>
-            )}
+            </div>
+          )}
           </div>
  
           {/* Sidebar / Tools Control */}
@@ -1151,68 +1470,147 @@ function DocumentPreviewModal() {
                   )}
 
                   {activeTab === EditTab.CROP && (
-                    <div className="flex flex-col gap-3">
-                      <span className="text-xs font-semibold text-text-muted uppercase">Perspective Crop</span>
-                      <p className="text-xs text-text-secondary">Drag the 4 corner handles individually to select any shape. After crop, the selected area will flatten into a 90-degree rectangle.</p>
-                      
+                    <div className="flex flex-col gap-2.5 animate-fade-in text-xs">
+                      <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Perspective Crop</span>
+                      <p className="text-[11px] text-text-secondary leading-snug">
+                        Drag the box or corner handles to select. Click & hold inside selection box to move it.
+                      </p>
+
+                      {/* Custom Dimensions Input Box */}
+                      <div className="bg-bg-sunken border border-border p-2.5 rounded-lg space-y-2">
+                        <span className="text-[10px] font-bold text-text-primary uppercase tracking-wider block">
+                          Custom Size Input
+                        </span>
+                        <div className="grid grid-cols-3 gap-1.5 items-center">
+                          <div>
+                            <label className="text-[10px] font-semibold text-text-secondary block mb-0.5">Width</label>
+                            <input
+                              type="number"
+                              placeholder="W"
+                              value={customCropWidth}
+                              onChange={(e) => setCustomCropWidth(e.target.value)}
+                              className="w-full px-2 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-text-secondary block mb-0.5">Height</label>
+                            <input
+                              type="number"
+                              placeholder="H"
+                              value={customCropHeight}
+                              onChange={(e) => setCustomCropHeight(e.target.value)}
+                              className="w-full px-2 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-text-secondary block mb-0.5">Unit</label>
+                            <select
+                              value={customCropUnit}
+                              onChange={(e) => setCustomCropUnit(e.target.value as any)}
+                              className="w-full px-1.5 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
+                            >
+                              <option value="px">px</option>
+                              <option value="mm">mm</option>
+                              <option value="cm">cm</option>
+                              <option value="in">in</option>
+                            </select>
+                          </div>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="w-full justify-center py-1 text-xs font-semibold"
+                          onClick={() => applyCustomCropDimensions()}
+                        >
+                          Set Selection Box
+                        </Button>
+
+                        {/* Recommended Presets */}
+                        <div className="pt-1 border-t border-border/60">
+                          <span className="text-[9px] font-semibold text-text-muted uppercase tracking-wider block mb-1">Recommended Presets</span>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { label: 'Passport (3.5×4.5 cm)', w: '3.5', h: '4.5', unit: 'cm' as const },
+                              { label: 'Stamp (2×2.5 cm)', w: '2', h: '2.5', unit: 'cm' as const },
+                              { label: 'A4 (210×297 mm)', w: '210', h: '297', unit: 'mm' as const },
+                              { label: '4×6 in', w: '4', h: '6', unit: 'in' as const },
+                              { label: 'Square 1:1', w: '500', h: '500', unit: 'px' as const },
+                            ].map((preset) => (
+                              <button
+                                key={preset.label}
+                                type="button"
+                                onClick={() => {
+                                  setCustomCropWidth(preset.w);
+                                  setCustomCropHeight(preset.h);
+                                  setCustomCropUnit(preset.unit);
+                                  applyCustomCropDimensions(preset.w, preset.h, preset.unit);
+                                }}
+                                className="px-1.5 py-0.5 text-[10px] bg-bg-surface hover:bg-accent/10 border border-border hover:border-accent/40 rounded text-text-secondary hover:text-accent transition-colors font-medium"
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
                       {cvStatus === 'loaded' ? (
                         <Button 
                           variant="secondary" 
-                          className="w-full justify-center text-sm border-accent text-accent hover:bg-accent/5"
+                          className="w-full justify-center text-xs border-accent text-accent hover:bg-accent/5 py-1.5"
                           onClick={detectDocumentCorners}
                         >
-                          <Sparkles size={16} className="mr-2" />
+                          <Sparkles size={14} className="mr-1.5" />
                           Auto Detect Corners
                         </Button>
                       ) : cvStatus === 'loading' ? (
-                        <div className="flex items-center justify-center gap-2 p-2 bg-bg-sunken border border-border rounded-md text-xs text-text-secondary">
+                        <div className="flex items-center justify-center gap-2 p-1.5 bg-bg-sunken border border-border rounded-md text-[11px] text-text-secondary">
                           <span className="animate-spin h-3.5 w-3.5 border-2 border-accent border-t-transparent rounded-full" />
                           Loading Auto-Crop helper...
                         </div>
                       ) : (
                         <Button 
                           variant="secondary" 
-                          className="w-full justify-center text-sm border-dashed text-text-secondary hover:bg-bg-sunken"
+                          className="w-full justify-center text-xs border-dashed text-text-secondary hover:bg-bg-sunken py-1.5"
                           onClick={loadOpenCV}
                         >
                           Enable Auto-Detect
                         </Button>
                       )}
 
-                      <div className="border-t border-border my-1" />
-                       <div className="flex gap-2">
+                      <div className="flex gap-1.5">
                         <Button
                           variant="secondary"
-                          className="flex-1 justify-center py-2 text-xs"
+                          className="flex-1 justify-center py-1.5 text-xs"
                           onClick={() => handleRotate(false)}
                         >
-                          <RotateCcw size={14} className="mr-1.5" />
+                          <RotateCcw size={13} className="mr-1" />
                           Rotate CCW
                         </Button>
                         <Button
                           variant="secondary"
-                          className="flex-1 justify-center py-2 text-xs"
+                          className="flex-1 justify-center py-1.5 text-xs"
                           onClick={() => handleRotate(true)}
                         >
-                          <RotateCw size={14} className="mr-1.5" />
+                          <RotateCw size={13} className="mr-1" />
                           Rotate CW
                         </Button>
                       </div>
 
                       <Button 
                         variant="primary" 
-                        className="w-full justify-center"
+                        className="w-full justify-center py-2 text-xs font-bold"
                         onClick={executeCrop}
                       >
-                        <Check size={16} className="mr-2" />
+                        <Check size={15} className="mr-1.5" />
                         Apply Crop
                       </Button>
                       <Button 
                         variant="ghost" 
-                        className="w-full justify-start text-sm"
+                        className="w-full justify-center text-xs py-1"
                         onClick={handleResetCrop}
                       >
-                        <RotateCcw size={16} className="mr-2" />
+                        <RotateCcw size={14} className="mr-1.5" />
                         Reset Crop & Rotation
                       </Button>
                     </div>

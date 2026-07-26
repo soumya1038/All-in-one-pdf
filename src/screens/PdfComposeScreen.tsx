@@ -18,7 +18,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
 import { AppView } from '../types/UI.types';
-import { OutputFormat } from '../types/Output.types';
+import { OutputFormat, ProcessingStep } from '../types/Output.types';
 import Button from '../components/ui/Button';
 import DragDropZone from '../components/ui/DragDropZone';
 import { PDFDocument } from 'pdf-lib';
@@ -685,8 +685,10 @@ export default function PdfComposeScreen() {
         useAppStore.getState().setProcessingStatus({
           outputPath: result.data,
           outputSize: savedSize,
-          status: 'completed',
-          progress: 100
+          step: ProcessingStep.COMPLETE,
+          progress: 100,
+          totalFiles: 1,
+          processedFiles: 1
         });
         setView(AppView.SUCCESS);
       } else if (result.error && result.error.message !== 'Save cancelled by user') {

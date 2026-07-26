@@ -3,6 +3,7 @@ import { join, dirname, basename, extname } from 'path';
 import { spawn } from 'child_process';
 import { PDFDocument } from 'pdf-lib';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
+import { WatermarkOptions } from '../../../src/types/Output.types';
 import { getTempFilePath } from '../utils/tempDir';
 import { createCanvas } from 'canvas';
 import pdfjs from 'pdfjs-dist/legacy/build/pdf.js';
@@ -638,6 +639,159 @@ print('OK')
             ? 'Python is not installed or not in PATH. Please install Python 3 and run: pip install pypdf'
             : 'Failed to protect PDF. Ensure Python 3 and pypdf are installed (pip install pypdf).',
           detail: errMsg,
+          recoverable: true,
+        },
+      };
+    }
+  }
+
+  /**
+   * Apply text or image watermark to all pages of a PDF file
+   */
+  async applyWatermark(filePath: string, watermark: WatermarkOptions): Promise<Result<void>> {
+    try {
+      const { PDFDocument, rgb, degrees, StandardFonts } = await import('pdf-lib');
+      const fileBytes = await readFile(filePath);
+      const pdfDoc = await PDFDocument.load(fileBytes, { ignoreEncryption: true });
+      
+      const pageCount = pdfDoc.getPageCount();
+      
+      let embeddedImage: any = null;
+      let imgWidth = 100;
+      let imgHeight = 100;
+      
+      if (watermark.type === 'image' && watermark.imagePath) {
+        const imgBytes = await readFile(watermark.imagePath);
+        const ext = watermark.imagePath.toLowerCase();
+        
+        let finalImgBytes: Uint8Array = new Uint8Array(imgBytes);
+        let isPng = ext.endsWith('.png');
+        if (ext.endsWith('.webp') || ext.endsWith('.bmp') || ext.endsWith('.tiff') || ext.endsWith('.tif')) {
+          finalImgBytes = new Uint8Array(await sharp(imgBytes).png().toBuffer());
+          isPng = true;
+        }
+        
+        embeddedImage = isPng 
+          ? await pdfDoc.embedPng(finalImgBytes)
+          : await pdfDoc.embedJpg(finalImgBytes);
+          
+        const scale = embeddedImage.scale(1);
+        imgWidth = scale.width;
+        imgHeight = scale.height;
+      }
+      
+      const opacity = watermark.opacity !== undefined ? watermark.opacity : 0.3;
+      const rotation = watermark.rotation !== undefined ? watermark.rotation : -45;
+      
+      // Parse Hex color to RGB
+      const hexToRgb = (hex: string) => {
+        const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
+        const fullHex = hex.replace(shorthandRegex, (_, r, g, b) => r + r + g + g + b + b);
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(fullHex);
+        return result ? {
+          r: parseInt(result[1], 16) / 255,
+          g: parseInt(result[2], 16) / 255,
+          b: parseInt(result[3], 16) / 255
+        } : { r: 0.5, g: 0.5, b: 0.5 };
+      };
+      
+      const colorObj = hexToRgb(watermark.color || '#FF0000');
+      const pdfColor = rgb(colorObj.r, colorObj.g, colorObj.b);
+      
+      const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      
+      for (let i = 0; i < pageCount; i++) {
+        const page = pdfDoc.getPage(i);
+        const { width, height } = page.getSize();
+        
+        if (watermark.type === 'text' && watermark.text) {
+          const text = watermark.text;
+          const fontSize = watermark.fontSize || 48;
+          
+          if (watermark.layout === 'grid') {
+            const stepX = 250;
+            const stepY = 250;
+            for (let x = 50; x < width; x += stepX) {
+              for (let y = 50; y < height; y += stepY) {
+                page.drawText(text, {
+                  x,
+                  y,
+                  size: fontSize,
+                  font,
+                  color: pdfColor,
+                  opacity,
+                  rotate: degrees(rotation),
+                });
+              }
+            }
+          } else {
+            const textWidth = font.widthOfTextAtSize(text, fontSize);
+            const textHeight = font.heightAtSize(fontSize);
+            
+            // Center the watermark on the page
+            page.drawText(text, {
+              x: (width - textWidth) / 2,
+              y: (height - textHeight) / 2,
+              size: fontSize,
+              font,
+              color: pdfColor,
+              opacity,
+              rotate: degrees(rotation),
+            });
+          }
+        } else if (watermark.type === 'image' && embeddedImage) {
+          let drawW = imgWidth;
+          let drawH = imgHeight;
+          
+          // Fit image to a maximum of 40% of the page size
+          const maxDim = Math.min(width, height) * 0.4;
+          if (drawW > maxDim || drawH > maxDim) {
+            const scale = maxDim / Math.max(drawW, drawH);
+            drawW *= scale;
+            drawH *= scale;
+          }
+          
+          if (watermark.layout === 'grid') {
+            const stepX = Math.max(200, drawW + 100);
+            const stepY = Math.max(200, drawH + 100);
+            for (let x = 50; x < width; x += stepX) {
+              for (let y = 50; y < height; y += stepY) {
+                page.drawImage(embeddedImage, {
+                  x,
+                  y,
+                  width: drawW,
+                  height: drawH,
+                  opacity,
+                  rotate: degrees(rotation),
+                });
+              }
+            }
+          } else {
+            const x = (width - drawW) / 2;
+            const y = (height - drawH) / 2;
+            page.drawImage(embeddedImage, {
+              x,
+              y,
+              width: drawW,
+              height: drawH,
+              opacity,
+              rotate: degrees(rotation),
+            });
+          }
+        }
+      }
+      
+      const watermarkedBytes = await pdfDoc.save();
+      await writeFile(filePath, watermarkedBytes);
+      return { success: true, data: undefined };
+    } catch (error) {
+      console.error('Failed to apply watermark:', error);
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to apply watermark to PDF',
+          detail: error instanceof Error ? error.message : 'Unknown error',
           recoverable: true,
         },
       };

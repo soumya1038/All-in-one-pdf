@@ -46,6 +46,32 @@ function OutputScreen() {
   const [ownerPassword, setOwnerPassword] = useState('');
   const [userPassword, setUserPassword] = useState('');
 
+  // Watermarking states
+  const [watermarkEnabled, setWatermarkEnabled] = useState(outputOptions.watermark?.enabled || false);
+  const [watermarkType, setWatermarkType] = useState<'text' | 'image'>(outputOptions.watermark?.type || 'text');
+  const [watermarkText, setWatermarkText] = useState(outputOptions.watermark?.text || 'CONFIDENTIAL');
+  const [watermarkImagePath, setWatermarkImagePath] = useState(outputOptions.watermark?.imagePath || '');
+  const [watermarkRotation, setWatermarkRotation] = useState(outputOptions.watermark?.rotation !== undefined ? outputOptions.watermark.rotation : -45);
+  const [watermarkOpacity, setWatermarkOpacity] = useState(outputOptions.watermark?.opacity !== undefined ? outputOptions.watermark.opacity : 0.3);
+  const [watermarkFontSize, setWatermarkFontSize] = useState(outputOptions.watermark?.fontSize || 48);
+  const [watermarkColor, setWatermarkColor] = useState(outputOptions.watermark?.color || '#FF0000');
+  const [watermarkLayout, setWatermarkLayout] = useState<'diagonal' | 'grid'>(outputOptions.watermark?.layout || 'diagonal');
+
+  const handleSelectWatermarkImage = async () => {
+    try {
+      const res = await window.electron.showOpenDialog({
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'tif'] }]
+      });
+      if (res.success && res.data && res.data.length > 0) {
+        setWatermarkImagePath(res.data[0]);
+        toast.success('Watermark image selected');
+      }
+    } catch (err) {
+      toast.error('Failed to select image');
+    }
+  };
+
   // Split-specific states
   const [splitMode, setSplitMode] = useState<'single' | 'custom'>('single');
   const [checkedPoints, setCheckedPoints] = useState<Record<number, boolean>>({});
@@ -253,6 +279,17 @@ function OutputScreen() {
       },
       splitPoints,
       workflow: activeWorkflow,
+      watermark: format === OutputFormat.PDF ? {
+        enabled: watermarkEnabled,
+        type: watermarkType,
+        text: watermarkType === 'text' ? watermarkText : undefined,
+        imagePath: watermarkType === 'image' ? watermarkImagePath : undefined,
+        rotation: watermarkRotation,
+        opacity: watermarkOpacity,
+        fontSize: watermarkFontSize,
+        color: watermarkColor,
+        layout: watermarkLayout,
+      } : undefined,
     });
 
     // Navigate to processing
@@ -363,6 +400,7 @@ function OutputScreen() {
   const showDpi = [OutputFormat.JPEG, OutputFormat.PNG, OutputFormat.TIFF].includes(format) && activeWorkflow !== WorkflowType.COMPRESS_IMAGE;
   const showMergeOption = activeWorkflow === WorkflowType.NONE && documents.length > 1 && format === OutputFormat.PDF;
   const showProtectionSetting = activeWorkflow === WorkflowType.NONE && format === OutputFormat.PDF;
+  const showWatermarkSetting = format === OutputFormat.PDF && activeWorkflow !== WorkflowType.SPLIT;
   const canExportDocx = documents.length === 1 && documents[0]?.type === DocumentType.PDF && activeWorkflow !== WorkflowType.COMPRESS_IMAGE;
 
   return (
@@ -411,7 +449,7 @@ function OutputScreen() {
                     <div className="w-12 h-16 bg-bg-sunken rounded border border-border flex items-center justify-center overflow-hidden flex-shrink-0">
                       {documents[0].thumbnailPath ? (
                         <img
-                          src={`docuflow:///${documents[0].thumbnailPath.replace(/\\/g, '/')}`}
+                          src={`docuflow:///${documents[0].thumbnailPath.replace(/\\/g, '/')}?t=${Date.now()}`}
                           alt="Thumbnail"
                           className="w-full h-full object-cover"
                         />
@@ -772,6 +810,162 @@ function OutputScreen() {
                       ⚠️ Warning: If you forget these passwords, the file cannot be recovered.
                     </p>
                   </>
+                )}
+              </div>
+            )}
+
+            {/* PDF Watermark Settings */}
+            {showWatermarkSetting && (
+              <div className="border border-border rounded-md p-4 space-y-4 bg-bg-surface">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="watermark-enabled"
+                    checked={watermarkEnabled}
+                    onChange={(e) => setWatermarkEnabled(e.target.checked)}
+                    className="w-4 h-4 text-accent border-border rounded focus:ring-border-focus"
+                  />
+                  <label htmlFor="watermark-enabled" className="text-sm font-semibold text-text-primary cursor-pointer">
+                    Apply PDF Watermark
+                  </label>
+                </div>
+
+                {watermarkEnabled && (
+                  <div className="space-y-4 pt-2 border-t border-border/60 animate-fade-in">
+                    <div>
+                      <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+                        Watermark Type
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setWatermarkType('text')}
+                          className={`flex-1 py-2 text-xs font-semibold rounded-md border transition-fast ${watermarkType === 'text' ? 'bg-accent/5 text-accent border-accent' : 'bg-bg-surface text-text-secondary border-border hover:bg-bg-sunken'}`}
+                        >
+                          Text Overlay
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWatermarkType('image')}
+                          className={`flex-1 py-2 text-xs font-semibold rounded-md border transition-fast ${watermarkType === 'image' ? 'bg-accent/5 text-accent border-accent' : 'bg-bg-surface text-text-secondary border-border hover:bg-bg-sunken'}`}
+                        >
+                          Image Overlay
+                        </button>
+                      </div>
+                    </div>
+
+                    {watermarkType === 'text' ? (
+                      <div className="space-y-3">
+                        <Input
+                          label="Watermark Text"
+                          value={watermarkText}
+                          onChange={(e) => setWatermarkText(e.target.value)}
+                          placeholder="e.g. CONFIDENTIAL"
+                          fullWidth
+                        />
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-text-secondary mb-1">
+                              Font Size ({watermarkFontSize}px)
+                            </label>
+                            <input
+                              type="range"
+                              min={12}
+                              max={96}
+                              value={watermarkFontSize}
+                              onChange={(e) => setWatermarkFontSize(parseInt(e.target.value))}
+                              className="w-full accent-accent"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-text-secondary mb-1">
+                              Font Color
+                            </label>
+                            <div className="flex gap-2 items-center">
+                              <input
+                                type="color"
+                                value={watermarkColor}
+                                onChange={(e) => setWatermarkColor(e.target.value)}
+                                className="w-10 h-8 border border-border rounded cursor-pointer p-0"
+                              />
+                              <span className="text-xs text-text-secondary font-mono uppercase">{watermarkColor}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <label className="block text-xs font-semibold text-text-secondary mb-1">
+                          Select Watermark Image
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            type="button"
+                            onClick={handleSelectWatermarkImage}
+                          >
+                            Browse Image...
+                          </Button>
+                          <span className="text-xs text-text-secondary truncate flex-1 font-mono bg-bg-sunken px-2 py-1.5 rounded border border-border">
+                            {watermarkImagePath ? watermarkImagePath.split(/[\\/]/).pop() : 'No image selected'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-text-secondary mb-1">
+                          Opacity ({Math.round(watermarkOpacity * 100)}%)
+                        </label>
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={0.9}
+                          step={0.05}
+                          value={watermarkOpacity}
+                          onChange={(e) => setWatermarkOpacity(parseFloat(e.target.value))}
+                          className="w-full accent-accent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-text-secondary mb-1">
+                          Rotation ({watermarkRotation}°)
+                        </label>
+                        <input
+                          type="range"
+                          min={-90}
+                          max={90}
+                          value={watermarkRotation}
+                          onChange={(e) => setWatermarkRotation(parseInt(e.target.value))}
+                          className="w-full accent-accent"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
+                        Layout Styling
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setWatermarkLayout('diagonal')}
+                          className={`flex-1 py-1.5 text-xs font-medium rounded-md border transition-fast ${watermarkLayout === 'diagonal' ? 'bg-accent/5 text-accent border-accent' : 'bg-bg-surface text-text-secondary border-border hover:bg-bg-sunken'}`}
+                        >
+                          Diagonal (Centered)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWatermarkLayout('grid')}
+                          className={`flex-1 py-1.5 text-xs font-medium rounded-md border transition-fast ${watermarkLayout === 'grid' ? 'bg-accent/5 text-accent border-accent' : 'bg-bg-surface text-text-secondary border-border hover:bg-bg-sunken'}`}
+                        >
+                          Repeating Grid
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             )}

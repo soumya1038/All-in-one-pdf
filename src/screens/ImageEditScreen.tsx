@@ -20,7 +20,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
 import { AppView } from '../types/UI.types';
-import { OutputFormat } from '../types/Output.types';
+import { OutputFormat, ProcessingStep } from '../types/Output.types';
 import Button from '../components/ui/Button';
 import { PDFDocument } from 'pdf-lib';
 import { removeBackground } from '@imgly/background-removal';
@@ -830,8 +830,10 @@ export default function ImageEditScreen() {
         useAppStore.getState().setProcessingStatus({
           outputPath: result.data,
           outputSize: savedSize,
-          status: 'completed',
-          progress: 100
+          step: ProcessingStep.COMPLETE,
+          progress: 100,
+          totalFiles: 1,
+          processedFiles: 1
         });
         setView(AppView.SUCCESS);
       } else if (result.error?.message !== 'Save cancelled by user') {
@@ -876,8 +878,10 @@ export default function ImageEditScreen() {
         useAppStore.getState().setProcessingStatus({
           outputPath: result.data,
           outputSize: savedSize,
-          status: 'completed',
-          progress: 100
+          step: ProcessingStep.COMPLETE,
+          progress: 100,
+          totalFiles: 1,
+          processedFiles: 1
         });
         setView(AppView.SUCCESS);
       } else if (result.error?.message !== 'Save cancelled by user') {

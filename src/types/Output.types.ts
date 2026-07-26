@@ -38,6 +38,18 @@ export interface PdfProtection {
  */
 export type CompressionLevel = 'low' | 'medium' | 'high' | 'extreme';
 
+export interface WatermarkOptions {
+  enabled: boolean;
+  type: 'text' | 'image';
+  text?: string;
+  imagePath?: string;
+  rotation?: number;
+  opacity?: number;
+  fontSize?: number;
+  color?: string;
+  layout?: 'diagonal' | 'grid';
+}
+
 export interface OutputOptions {
   filename: string;
   format: OutputFormat;
@@ -50,6 +62,7 @@ export interface OutputOptions {
   mergeAsSingle: boolean;       // Merge multiple files into one PDF
   splitPoints?: number[];       // Split points (page indices) for splitting
   workflow?: string;            // Active workflow type name
+  watermark?: WatermarkOptions; // Optional watermark options
 }
 
 /**

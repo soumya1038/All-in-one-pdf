@@ -10,6 +10,8 @@ export enum AppView {
   PREVIEW = 'PREVIEW',
   PDF_COMPOSE = 'PDF_COMPOSE',
   IMAGE_EDIT = 'IMAGE_EDIT',
+  CANVAS_EDITOR = 'CANVAS_EDITOR',
+  OCR = 'OCR',
 }
 
 /**
