@@ -104,7 +104,7 @@ function getDocumentType(ext: string): DocumentType {
   
   if (['.docx', '.doc'].includes(extLower)) return DocumentType.WORD;
   
-  if (['.xlsx', '.xls'].includes(extLower)) return DocumentType.EXCEL;
+  if (['.xlsx', '.xls', '.csv', '.ods'].includes(extLower)) return DocumentType.EXCEL;
   
   if (['.pptx', '.ppt'].includes(extLower)) return DocumentType.POWERPOINT;
   

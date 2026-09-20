@@ -1,8 +1,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { setAutoFreeze } from 'immer';
 import App from './App';
 import './index.css';
 import { useAppStore } from './store/appStore';
+
+// Disable Immer autoFreeze so FortuneSheet and nested state can mutate cell/selection/sheet attributes without throwing TypeError: Cannot assign to read only property
+setAutoFreeze(false);
 
 // Expose store globally so the Electron main process can inspect app state
 // during the window close event (via webContents.executeJavaScript) to warn

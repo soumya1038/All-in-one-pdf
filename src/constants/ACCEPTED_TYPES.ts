@@ -13,6 +13,12 @@ export const ACCEPTED_TYPES = {
   '.tiff': 'image/tiff',
   '.tif': 'image/tiff',
   '.webp': 'image/webp',
+
+  // Spreadsheets
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xls': 'application/vnd.ms-excel',
+  '.csv': 'text/csv',
+  '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
 } as const;
 
 /**
@@ -42,4 +48,8 @@ export const FILE_TYPE_MAP = {
   tiff: 'IMAGE',
   tif: 'IMAGE',
   webp: 'IMAGE',
+  xlsx: 'EXCEL',
+  xls: 'EXCEL',
+  csv: 'EXCEL',
+  ods: 'EXCEL',
 } as const;

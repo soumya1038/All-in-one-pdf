@@ -2,6 +2,7 @@ import { Result } from './Error.types';
 import { DocumentItem, DocumentType, RecentFile, PlacedSignature } from './Document.types';
 import { ScannerDevice, ScanSettings, ScanResult } from './Scanner.types';
 import { OutputOptions, ProcessingResult } from './Output.types';
+import { WorkbookData } from './Excel.types';
 
 /**
  * IPC Channel names following docuflow:[noun]:[verb] convention
@@ -58,6 +59,14 @@ export enum IpcChannel {
   WINDOW_MINIMIZE = 'docuflow:window:minimize',
   WINDOW_MAXIMIZE = 'docuflow:window:maximize',
   WINDOW_CLOSE = 'docuflow:window:close',
+
+  // Excel operations
+  EXCEL_OPEN = 'docuflow:excel:open',
+  EXCEL_SAVE = 'docuflow:excel:save',
+  EXCEL_EXPORT_PDF = 'docuflow:excel:exportPdf',
+  EXCEL_PRINT = 'docuflow:excel:print',
+  EXCEL_NEW = 'docuflow:excel:new',
+  EXCEL_AUTO_SAVE = 'docuflow:excel:autoSave',
 }
 
 /**
@@ -217,4 +226,12 @@ export interface IpcApi {
   minimizeWindow: () => void;
   maximizeWindow: () => void;
   closeWindow: () => void;
+
+  // Excel operations
+  openExcel: (filePath: string) => Promise<Result<WorkbookData>>;
+  saveExcel: (workbookData: WorkbookData, targetPath?: string, format?: string) => Promise<Result<string>>;
+  exportExcelToPdf: (workbookData: WorkbookData) => Promise<Result<string>>;
+  printExcel: (workbookData: WorkbookData) => Promise<Result<void>>;
+  newExcelWorkbook: () => Promise<Result<WorkbookData>>;
+  autoSaveExcel: (workbookData: WorkbookData, sessionId: string) => Promise<Result<void>>;
 }

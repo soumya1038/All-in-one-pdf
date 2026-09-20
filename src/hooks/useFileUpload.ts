@@ -5,6 +5,7 @@ import { MAX_SESSION_SIZE_WARNING } from '../constants/ACCEPTED_TYPES';
 import { formatFileSize } from '../utils/formatFileSize';
 import { AppView, WorkflowType } from '../types/UI.types';
 import { OutputFormat } from '../types/Output.types';
+import { DocumentType } from '../types/Document.types';
 
 /**
  * Hook for handling file uploads with validation and IPC communication.
@@ -25,6 +26,7 @@ export function useFileUpload() {
   const setView = useAppStore((state) => state.setView);
   const activeWorkflow = useAppStore((state) => state.ui.activeWorkflow);
   const updateOutputOptions = useAppStore((state) => state.updateOutputOptions);
+  const setExcelEditorState = useAppStore((state) => state.setExcelEditorState);
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -157,7 +159,31 @@ export function useFileUpload() {
             updateOutputOptions({ format: OutputFormat.PDF, filename: `${fileBaseName}_split` });
             setView(AppView.OUTPUT_OPTIONS);
           } else {
-            setView(AppView.DOCUMENT_LIST);
+            // Check if any uploaded doc is an Excel file — auto-open in editor
+            const excelDoc = uploadedDocs.find((d) => d.type === DocumentType.EXCEL);
+            if (excelDoc) {
+              try {
+                const excelResult = await window.electron.openExcel(excelDoc.tempPath);
+                if (excelResult.success) {
+                  setExcelEditorState({
+                    isOpen: true,
+                    filePath: excelDoc.originalPath,
+                    workbookData: excelResult.data,
+                    isDirty: false,
+                    isLoading: false,
+                  });
+                  setView(AppView.EXCEL_EDITOR);
+                } else {
+                  toast.error('Failed to open spreadsheet');
+                  setView(AppView.DOCUMENT_LIST);
+                }
+              } catch {
+                toast.error('Failed to open spreadsheet');
+                setView(AppView.DOCUMENT_LIST);
+              }
+            } else {
+              setView(AppView.DOCUMENT_LIST);
+            }
           }
         } else {
           toast.error(result.error.message);
@@ -169,7 +195,7 @@ export function useFileUpload() {
         setIsUploading(false);
       }
     },
-    [addDocuments, documents, setView, activeWorkflow, updateOutputOptions]
+    [addDocuments, documents, setView, activeWorkflow, updateOutputOptions, setExcelEditorState]
   );
 
   return {

@@ -122,3 +122,123 @@
 .signature-pad-canvas {
   cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="black" stroke="white" stroke-width="1.5"/><line x1="12" y1="2" x2="12" y2="22" stroke="black" stroke-width="1"/><line x1="2" y1="12" x2="22" y2="12" stroke="black" stroke-width="1"/></svg>') 12 12, crosshair;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Excel Editor — FortuneSheet Overrides
+   Restyle the embedded FortuneSheet grid to match DocuFlow's
+   minimalist warm-gray + blue-accent design system.
+   ────────────────────────────────────────────────────────────────── */
+
+/* Ensure FortuneSheet fills its wrapper */
+.fortune-sheet-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+.fortune-sheet-wrapper > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Grid container background */
+.excel-editor-container .fortune-sheet-wrapper {
+  background: #FFFFFF;
+}
+
+/* Override FortuneSheet cell selection border to use accent blue */
+.fortune-sheet-wrapper .luckysheet-cell-selected {
+  border-color: #2563EB !important;
+}
+
+/* Selection highlight */
+.fortune-sheet-wrapper .luckysheet-cell-selected-focus {
+  border-color: #2563EB !important;
+}
+
+/* Column/row header backgrounds */
+.fortune-sheet-wrapper .luckysheet-cols-h-cells .luckysheet-cols-h-cell,
+.fortune-sheet-wrapper .luckysheet-rows-h-cells .luckysheet-rows-h-cell {
+  background: #F7F6F4 !important;
+  border-color: #EEECEA !important;
+  color: #57534E !important;
+  font-size: 11px !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+/* Active header highlight */
+.fortune-sheet-wrapper .luckysheet-cols-h-cell-active,
+.fortune-sheet-wrapper .luckysheet-rows-h-cell-active {
+  background: #DBEAFE !important;
+  color: #2563EB !important;
+}
+
+/* Grid lines */
+.fortune-sheet-wrapper .luckysheet-cell-border-right,
+.fortune-sheet-wrapper .luckysheet-cell-border-bottom {
+  border-color: #EEECEA !important;
+}
+
+/* Context menu styling */
+.fortune-sheet-wrapper .luckysheet-cols-menu,
+.fortune-sheet-wrapper .luckysheet-rightclick-menu {
+  background: #FFFFFF !important;
+  border: 1px solid #D9D6D1 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+  padding: 4px 0 !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+.fortune-sheet-wrapper .luckysheet-cols-menu li,
+.fortune-sheet-wrapper .luckysheet-rightclick-menu .luckysheet-cols-menuitem {
+  font-size: 13px !important;
+  color: #1C1917 !important;
+  padding: 6px 12px !important;
+  border-radius: 4px !important;
+  margin: 0 4px !important;
+}
+
+.fortune-sheet-wrapper .luckysheet-cols-menu li:hover,
+.fortune-sheet-wrapper .luckysheet-rightclick-menu .luckysheet-cols-menuitem:hover {
+  background: #EEECEA !important;
+}
+
+/* Scrollbar overrides inside the grid */
+.fortune-sheet-wrapper .luckysheet-scrollbar-x,
+.fortune-sheet-wrapper .luckysheet-scrollbar-y {
+  background: transparent !important;
+}
+
+.fortune-sheet-wrapper .luckysheet-scrollbar-x div,
+.fortune-sheet-wrapper .luckysheet-scrollbar-y div {
+  background: #D9D6D1 !important;
+  border-radius: 9999px !important;
+}
+
+/* Suppress FortuneSheet's built-in oversized search/replace popup */
+#fortune-search-replace,
+.fortune-search-replace,
+div[id="fortune-search-replace"],
+.fortune-sheet-wrapper #fortune-search-replace,
+.fortune-sheet-wrapper .fortune-search-replace,
+.fortune-sheet-wrapper .luckysheet-search-replace,
+.fortune-modal-dialog-slider {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  position: absolute !important;
+  left: -9999px !important;
+  top: -9999px !important;
+}
+
+/* Cell editor input */
+.fortune-sheet-wrapper .luckysheet-input-box {
+  border-color: #2563EB !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+

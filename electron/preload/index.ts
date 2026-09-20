@@ -116,6 +116,20 @@ const api: IpcApi = {
   minimizeWindow: () => ipcRenderer.send(IpcChannel.WINDOW_MINIMIZE),
   maximizeWindow: () => ipcRenderer.send(IpcChannel.WINDOW_MAXIMIZE),
   closeWindow:    () => ipcRenderer.send(IpcChannel.WINDOW_CLOSE),
+
+  // Excel operations
+  openExcel: (filePath) =>
+    ipcRenderer.invoke(IpcChannel.EXCEL_OPEN, filePath),
+  saveExcel: (workbookData, targetPath, format) =>
+    ipcRenderer.invoke(IpcChannel.EXCEL_SAVE, { workbookData, targetPath, format }),
+  exportExcelToPdf: (workbookData) =>
+    ipcRenderer.invoke(IpcChannel.EXCEL_EXPORT_PDF, workbookData),
+  printExcel: (workbookData) =>
+    ipcRenderer.invoke(IpcChannel.EXCEL_PRINT, workbookData),
+  newExcelWorkbook: () =>
+    ipcRenderer.invoke(IpcChannel.EXCEL_NEW),
+  autoSaveExcel: (workbookData, sessionId) =>
+    ipcRenderer.invoke(IpcChannel.EXCEL_AUTO_SAVE, { workbookData, sessionId }),
 };
 
 /**

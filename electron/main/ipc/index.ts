@@ -4,6 +4,7 @@ import { registerPdfHandlers } from './pdf.handler';
 import { registerOutputHandlers } from './output.handler';
 import { registerSystemHandlers } from './system.handler';
 import { registerDocumentHandlers } from './document.handler';
+import { registerExcelHandlers } from './excel.handler';
 
 /**
  * Register all IPC handlers
@@ -16,6 +17,7 @@ export function registerIpcHandlers(): void {
   registerOutputHandlers();
   registerSystemHandlers();
   registerDocumentHandlers();
+  registerExcelHandlers();
   
   console.log('All IPC handlers registered');
 }

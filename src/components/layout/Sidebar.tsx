@@ -1,4 +1,4 @@
-import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage, Layout, Camera, Pencil, FileText } from 'lucide-react';
+import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage, Layout, Camera, Pencil, FileText, Sheet } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../../store/appStore';
 import { ModalType, AppView, WorkflowType } from '../../types/UI.types';
@@ -204,6 +204,11 @@ function Sidebar() {
       icon: <FileText size={20} />,
       label: 'Offline OCR',
       action: () => handleActionClick(AppView.OCR, WorkflowType.NONE, 'Offline OCR', () => setView(AppView.OCR)),
+    },
+    {
+      icon: <Sheet size={20} />,
+      label: 'Excel Editor',
+      action: () => handleActionClick(AppView.EXCEL_EDITOR, WorkflowType.NONE, 'Excel Editor', () => setView(AppView.EXCEL_EDITOR)),
     },
   ];
 

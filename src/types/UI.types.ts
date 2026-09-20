@@ -12,6 +12,7 @@ export enum AppView {
   IMAGE_EDIT = 'IMAGE_EDIT',
   CANVAS_EDITOR = 'CANVAS_EDITOR',
   OCR = 'OCR',
+  EXCEL_EDITOR = 'EXCEL_EDITOR',
 }
 
 /**
@@ -38,6 +39,7 @@ export enum WorkflowType {
   CONVERT = 'CONVERT',
   SPLIT = 'SPLIT',
   PROTECT = 'PROTECT',
+  EXCEL_EDIT = 'EXCEL_EDIT',
 }
 
 /**

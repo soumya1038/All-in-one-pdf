@@ -3,6 +3,7 @@ import { DocumentItem, RecentFile } from '../types/Document.types';
 import { OutputOptions, ProcessingStatus, OutputFormat, PdfPageSize } from '../types/Output.types';
 import { ScannerState, ScannerStatus, ScanColorMode, ScanPaperSize } from '../types/Scanner.types';
 import { UIState, AppView, ModalType, WorkflowType } from '../types/UI.types';
+import { ExcelEditorState, WorkbookData, DEFAULT_EXCEL_EDITOR_STATE } from '../types/Excel.types';
 
 /**
  * Main application state interface
@@ -57,6 +58,13 @@ interface AppState {
   };
   showConfirm: (message: string, title?: string, confirmText?: string, cancelText?: string) => Promise<boolean>;
   closeConfirm: (result: boolean) => void;
+
+  // Excel editor state
+  excelEditor: ExcelEditorState;
+  setExcelEditorState: (updates: Partial<ExcelEditorState>) => void;
+  setExcelWorkbookData: (data: WorkbookData | null) => void;
+  setExcelDirty: (isDirty: boolean) => void;
+  resetExcelEditor: () => void;
 }
 
 /**
@@ -274,4 +282,25 @@ export const useAppStore = create<AppState>((set) => ({
       };
     });
   },
+
+  // Excel editor state
+  excelEditor: DEFAULT_EXCEL_EDITOR_STATE,
+
+  setExcelEditorState: (updates) =>
+    set((state) => ({
+      excelEditor: { ...state.excelEditor, ...updates },
+    })),
+
+  setExcelWorkbookData: (data) =>
+    set((state) => ({
+      excelEditor: { ...state.excelEditor, workbookData: data },
+    })),
+
+  setExcelDirty: (isDirty) =>
+    set((state) => ({
+      excelEditor: { ...state.excelEditor, isDirty },
+    })),
+
+  resetExcelEditor: () =>
+    set({ excelEditor: DEFAULT_EXCEL_EDITOR_STATE }),
 }));
