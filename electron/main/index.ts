@@ -16,7 +16,7 @@ async function createWindow() {
   // Create main window
   mainWindow = createMainWindow();
 
-  // Register all IPC handlers
+  // Register all IPC handlers (files, pdf, scanner, ocr, excel, etc.)
   registerIpcHandlers();
 
   // Handle window close confirmation if a process is ongoing
@@ -76,7 +76,7 @@ async function createWindow() {
  * Must be called BEFORE app.whenReady()
  */
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'docuflow', privileges: { bypassCSP: true, standard: true, secure: true, supportFetchAPI: true } }
+  { scheme: 'docuflow', privileges: { bypassCSP: true, standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }
 ]);
 
 /**

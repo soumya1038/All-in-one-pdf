@@ -1,5 +1,6 @@
 import { ipcMain, shell, BrowserWindow, dialog } from 'electron';
-import { writeFile } from 'fs/promises';
+import { writeFile, readFile } from 'fs/promises';
+import { extname } from 'path';
 import { IpcChannel } from '../../../src/types/IPC.types';
 import { Result, ErrorCode } from '../../../src/types/Error.types';
 import { RecentFile } from '../../../src/types/Document.types';
@@ -242,6 +243,41 @@ export function registerSystemHandlers(): void {
         error: {
           code: ErrorCode.UNKNOWN_ERROR,
           message: 'Failed to save file',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  });
+
+  /**
+   * Read an image file from disk and return as a data URL (base64)
+   * This completely avoids CORS and canvas tainting issues across all platforms.
+   */
+  ipcMain.handle(IpcChannel.SYSTEM_READ_IMAGE_DATA_URL, async (_, filePath: string) => {
+    try {
+      const buffer = await readFile(filePath);
+      const ext = extname(filePath).toLowerCase().replace('.', '');
+      const mimeTypes: Record<string, string> = {
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        webp: 'image/webp',
+        bmp: 'image/bmp',
+        gif: 'image/gif',
+        svg: 'image/svg+xml',
+        tiff: 'image/tiff',
+        tif: 'image/tiff',
+      };
+      const mime = mimeTypes[ext] || 'image/jpeg';
+      const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+      return { success: true, data: dataUrl };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to read image file',
           detail: error instanceof Error ? error.message : 'Unknown error',
           recoverable: true,
         },

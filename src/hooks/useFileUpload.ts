@@ -26,52 +26,30 @@ export function useFileUpload() {
   const setView = useAppStore((state) => state.setView);
   const activeWorkflow = useAppStore((state) => state.ui.activeWorkflow);
   const updateOutputOptions = useAppStore((state) => state.updateOutputOptions);
+  const setSelectedDocument = useAppStore((state) => state.setSelectedDocument);
   const setExcelEditorState = useAppStore((state) => state.setExcelEditorState);
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
 
-      // ── Workflow-level input constraints ────────────────────────────────
-      if (
-        activeWorkflow === WorkflowType.COMPRESS ||
-        activeWorkflow === WorkflowType.SPLIT ||
-        activeWorkflow === WorkflowType.PROTECT
-      ) {
-        if (files.length > 1 || documents.length > 0) {
-          toast.error('This action accepts exactly one PDF document.');
-          return;
-        }
+      // Validate single-file uploads when a specific workflow is active
+      if (files.length === 1) {
         const file = files[0];
         const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
-        if (!isPdf) {
-          toast.error('Only PDF documents are accepted for this action.');
-          return;
-        }
-      } else if (activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
-        if (files.length > 1 || documents.length > 0) {
-          toast.error('This action accepts exactly one image.');
-          return;
-        }
-        const file = files[0];
         const ext = file.name.toLowerCase();
         const isImage = ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.png') ||
                         ext.endsWith('.webp') || ext.endsWith('.bmp') || ext.endsWith('.tiff') || ext.endsWith('.tif');
-        if (!isImage) {
-          toast.error('Only image files are accepted for this action.');
+
+        if (
+          (activeWorkflow === WorkflowType.COMPRESS ||
+           activeWorkflow === WorkflowType.SPLIT ||
+           activeWorkflow === WorkflowType.PROTECT) && !isPdf
+        ) {
+          toast.error('Only PDF documents are accepted for this action.');
           return;
-        }
-      } else if (activeWorkflow === WorkflowType.MERGE) {
-        for (const file of files) {
-          const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
-          if (!isPdf) {
-            toast.error('Only PDF documents are accepted for merging.');
-            return;
-          }
-        }
-      } else if (activeWorkflow === WorkflowType.CONVERT) {
-        if (files.length > 1 || documents.length > 0) {
-          toast.error('This action accepts exactly one document for conversion.');
+        } else if (activeWorkflow === WorkflowType.COMPRESS_IMAGE && !isImage) {
+          toast.error('Only image files are accepted for this action.');
           return;
         }
       }
@@ -136,27 +114,28 @@ export function useFileUpload() {
 
           // ── Navigate to next screen based on workflow ─────────────────────
           const firstDoc = uploadedDocs[0];
+          setSelectedDocument(firstDoc.id);
           const fileBaseName = firstDoc.filename.substring(0, firstDoc.filename.lastIndexOf('.')) || firstDoc.filename;
 
-          if (activeWorkflow === WorkflowType.COMPRESS) {
-            updateOutputOptions({ format: OutputFormat.PDF, compress: true, filename: `${fileBaseName}_compressed` });
+          if (uploadedDocs.length === 1 && activeWorkflow === WorkflowType.COMPRESS) {
+            updateOutputOptions({ documentId: firstDoc.id, format: OutputFormat.PDF, compress: true, filename: `${fileBaseName}_compressed` });
             setView(AppView.OUTPUT_OPTIONS);
-          } else if (activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
+          } else if (uploadedDocs.length === 1 && activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
             const ext = firstDoc.filename.toLowerCase();
             let format = OutputFormat.JPEG;
             if (ext.endsWith('.png')) format = OutputFormat.PNG;
             else if (ext.endsWith('.tiff') || ext.endsWith('.tif')) format = OutputFormat.TIFF;
 
-            updateOutputOptions({ format, compress: true, filename: `${fileBaseName}_compressed` });
+            updateOutputOptions({ documentId: firstDoc.id, format, compress: true, filename: `${fileBaseName}_compressed` });
             setView(AppView.OUTPUT_OPTIONS);
-          } else if (activeWorkflow === WorkflowType.PROTECT) {
-            updateOutputOptions({ format: OutputFormat.PDF, protection: { enabled: true }, filename: `${fileBaseName}_protected` });
+          } else if (uploadedDocs.length === 1 && activeWorkflow === WorkflowType.PROTECT) {
+            updateOutputOptions({ documentId: firstDoc.id, format: OutputFormat.PDF, protection: { enabled: true }, filename: `${fileBaseName}_protected` });
             setView(AppView.OUTPUT_OPTIONS);
-          } else if (activeWorkflow === WorkflowType.CONVERT) {
-            updateOutputOptions({ filename: `${fileBaseName}_converted` });
+          } else if (uploadedDocs.length === 1 && activeWorkflow === WorkflowType.CONVERT) {
+            updateOutputOptions({ documentId: firstDoc.id, filename: `${fileBaseName}_converted` });
             setView(AppView.OUTPUT_OPTIONS);
-          } else if (activeWorkflow === WorkflowType.SPLIT) {
-            updateOutputOptions({ format: OutputFormat.PDF, filename: `${fileBaseName}_split` });
+          } else if (uploadedDocs.length === 1 && activeWorkflow === WorkflowType.SPLIT) {
+            updateOutputOptions({ documentId: firstDoc.id, format: OutputFormat.PDF, filename: `${fileBaseName}_split` });
             setView(AppView.OUTPUT_OPTIONS);
           } else {
             // Check if any uploaded doc is an Excel file — auto-open in editor

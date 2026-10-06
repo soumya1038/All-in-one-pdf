@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
-import { Clock, FolderOpen, X } from 'lucide-react';
+import { useEffect } from 'react';
+import { Clock, FolderOpen, X, Layers, ArrowRight, Trash2 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
-import { WorkflowType } from '../types/UI.types';
+import { WorkflowType, AppView } from '../types/UI.types';
 import { useFileUpload } from '../hooks/useFileUpload';
 import { LoadingOverlay } from '../components/ui/Spinner';
 import DragDropZone from '../components/ui/DragDropZone';
@@ -28,40 +28,24 @@ function HomeScreen() {
     loadRecentFiles();
   }, [setRecentFiles]);
 
-  // Clear documents if landing back on Home to ensure a clean session.
-  // Uses a ref to avoid re-triggering when clearDocuments resets the array.
-  const hasCleared = useRef(false);
-  useEffect(() => {
-    if (!hasCleared.current && documents.length > 0) {
-      hasCleared.current = true;
-      for (const doc of documents) {
-        window.electron.deleteFile(doc.id).catch(() => {});
-      }
-      clearDocuments();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const setView = useAppStore((state) => state.setView);
 
   const handleBrowseClick = async () => {
     try {
-      let properties: ('openFile' | 'multiSelections')[] = ['openFile', 'multiSelections'];
+      const properties: ('openFile' | 'multiSelections')[] = ['openFile', 'multiSelections'];
       let extensions = ['pdf', 'jpg', 'jpeg', 'png', 'bmp', 'tiff', 'tif', 'webp', 'xlsx', 'xls', 'csv', 'ods'];
       let name = 'Supported Files';
 
       if (activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.SPLIT || activeWorkflow === WorkflowType.PROTECT) {
-        properties = ['openFile'];
         extensions = ['pdf'];
         name = 'PDF Documents';
       } else if (activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
-        properties = ['openFile'];
         extensions = ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'bmp'];
         name = 'Image Files';
       } else if (activeWorkflow === WorkflowType.MERGE) {
-        properties = ['openFile', 'multiSelections'];
         extensions = ['pdf'];
         name = 'PDF Documents';
       } else if (activeWorkflow === WorkflowType.CONVERT) {
-        properties = ['openFile'];
         extensions = ['pdf', 'jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp'];
         name = 'Supported Files';
       }
@@ -171,6 +155,50 @@ function HomeScreen() {
               {heroSubtitle}
             </p>
           </div>
+
+          {/* Active Session Banner */}
+          {documents.length > 0 && (
+            <div className="mb-6 p-4 rounded-xl border border-accent/40 bg-accent/10 flex items-center justify-between gap-4 animate-fade-in shadow-xs">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2.5 rounded-lg bg-accent text-white shrink-0">
+                  <Layers size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-text-primary truncate">
+                    Active Session: {documents.length} document{documents.length === 1 ? '' : 's'} loaded
+                  </p>
+                  <p className="text-xs text-text-secondary truncate">
+                    Your files are ready. Continue with them or upload more.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setView(AppView.DOCUMENT_LIST)}
+                  className="font-medium flex items-center gap-1.5"
+                >
+                  <span>View All ({documents.length})</span>
+                  <ArrowRight size={14} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    for (const doc of documents) {
+                      await window.electron.deleteFile(doc.id).catch(() => {});
+                    }
+                    clearDocuments();
+                  }}
+                  className="text-text-muted hover:text-error hover:bg-error/10 p-2"
+                  title="Clear session documents"
+                >
+                  <Trash2 size={16} />
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Upload Zone */}
           <DragDropZone onFilesDropped={uploadFiles} disabled={isUploading} />

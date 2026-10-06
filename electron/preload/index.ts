@@ -12,6 +12,9 @@ const api: IpcApi = {
   uploadFiles: (filePaths) =>
     ipcRenderer.invoke(IpcChannel.FILE_UPLOAD, filePaths),
 
+  uploadBase64File: (base64Data, filename, type) =>
+    ipcRenderer.invoke(IpcChannel.FILE_UPLOAD_BASE64, { base64Data, filename, type }),
+
   deleteFile: (documentId) =>
     ipcRenderer.invoke(IpcChannel.FILE_DELETE, documentId),
 
@@ -112,6 +115,9 @@ const api: IpcApi = {
   saveFileFromBase64: (base64Data, defaultFilename, filters) =>
     ipcRenderer.invoke(IpcChannel.SYSTEM_SAVE_BASE64, { base64Data, defaultFilename, filters }),
 
+  readImageAsDataUrl: (filePath) =>
+    ipcRenderer.invoke(IpcChannel.SYSTEM_READ_IMAGE_DATA_URL, filePath),
+
   // Window controls (fire-and-forget — no return value needed)
   minimizeWindow: () => ipcRenderer.send(IpcChannel.WINDOW_MINIMIZE),
   maximizeWindow: () => ipcRenderer.send(IpcChannel.WINDOW_MAXIMIZE),
@@ -130,6 +136,12 @@ const api: IpcApi = {
     ipcRenderer.invoke(IpcChannel.EXCEL_NEW),
   autoSaveExcel: (workbookData, sessionId) =>
     ipcRenderer.invoke(IpcChannel.EXCEL_AUTO_SAVE, { workbookData, sessionId }),
+
+  // OCR operations
+  runOcr: (request) =>
+    ipcRenderer.invoke(IpcChannel.OCR_RECOGNIZE, request),
+  renderPdfPagesForOcr: (request) =>
+    ipcRenderer.invoke(IpcChannel.OCR_RENDER_PDF_PAGES, request),
 };
 
 /**

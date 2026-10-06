@@ -3,13 +3,13 @@ import {
   Canvas as FabricCanvas,
   Rect,
   Circle,
+  Line,
   Textbox,
   FabricImage,
-  Triangle,
-  Line,
-  Polygon,
-  PencilBrush,
   FabricObject,
+  PencilBrush,
+  Group,
+  Polygon
 } from 'fabric';
 import {
   ArrowLeft,
@@ -18,297 +18,316 @@ import {
   Type,
   Square,
   Circle as CircleIcon,
-  ImagePlus,
   Undo2,
   Redo2,
   ZoomIn,
   ZoomOut,
   Maximize2,
   FolderOpen,
-  Lock,
-  Unlock,
-  Star,
-  Palette,
-  Trash,
-  Wand2,
-  Smile,
+  Trash2,
+  Copy,
+  FlipHorizontal,
+  FlipVertical,
+  RotateCw,
+  RotateCcw,
+  Pencil,
+  Check,
+  X,
+  Sliders,
+  Crop,
+  Shield,
+  Highlighter,
   Bold,
   Italic,
   Underline,
   AlignLeft,
   AlignCenter,
   AlignRight,
-  Layers,
-  Copy,
-  FlipHorizontal,
-  FlipVertical,
-  RotateCw,
-  Pencil,
-  MousePointer2,
-  Minus,
-  Move,
-  Triangle as TriangleIcon,
-  Hexagon,
-  Heart,
+  ArrowRight,
+  Layers
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
 import { AppView } from '../types/UI.types';
-import { OutputFormat } from '../types/Output.types';
 import Button from '../components/ui/Button';
 import DragDropZone from '../components/ui/DragDropZone';
 import { PDFDocument } from 'pdf-lib';
-import { removeBackground } from '@imgly/background-removal';
+import { DocumentItem, DocumentType } from '../types/Document.types';
+import DocumentSelectorBar from '../components/document/DocumentSelectorBar';
+import { registerUploadedFile } from '../utils/fileUploadHelper';
 
 /* ═══════════════════════════════════════════════
- *  Constants
+ *  Editor Tabs & Types
  * ═══════════════════════════════════════════════ */
-const FONT_OPTIONS = [
-  'Inter', 'Arial', 'Roboto', 'Open Sans', 'Montserrat', 'Poppins',
-  'Lato', 'Oswald', 'Playfair Display', 'Raleway', 'Georgia',
-  'Times New Roman', 'Courier New', 'Verdana', 'Impact', 'Comic Sans MS',
-  'Trebuchet MS', 'Garamond', 'Palatino', 'Tahoma', 'Segoe UI',
-  'Nunito', 'Ubuntu', 'Merriweather', 'Quicksand', 'DM Sans',
+type EditorTab = 'crop' | 'adjust' | 'text' | 'shapes' | 'draw';
+
+type FilterPreset = 'none' | 'enhance' | 'clean' | 'bw' | 'grayscale';
+
+export interface CustomFabricObject extends FabricObject {
+  customData?: {
+    isArrow?: boolean;
+    isRedact?: boolean;
+  };
+  isEditing?: boolean;
+  fontSize?: number;
+  fontWeight?: string | number;
+  fontStyle?: string;
+  underline?: boolean;
+  textAlign?: string;
+}
+
+interface AspectRatioPreset {
+  label: string;
+  ratio: number | null; // width / height, null for freeform
+  iconLabel: string;
+}
+
+const ASPECT_RATIOS: AspectRatioPreset[] = [
+  { label: 'Freeform', ratio: null, iconLabel: 'Free' },
+  { label: 'Square (1:1)', ratio: 1, iconLabel: '1:1' },
+  { label: 'Standard (4:3)', ratio: 4 / 3, iconLabel: '4:3' },
+  { label: 'Wide (16:9)', ratio: 16 / 9, iconLabel: '16:9' },
+  { label: 'Photo (3:2)', ratio: 3 / 2, iconLabel: '3:2' },
+  { label: 'Passport (3.5×4.5)', ratio: 35 / 45, iconLabel: 'ID' },
+  { label: 'A4 Document', ratio: 210 / 297, iconLabel: 'A4' },
 ];
 
 const PRESET_COLORS = [
-  '#000000', '#FFFFFF', '#F3F4F6', '#D1D5DB', '#6B7280', '#374151',
-  '#EF4444', '#DC2626', '#F97316', '#EA580C', '#F59E0B', '#84CC16',
-  '#22C55E', '#14B8A6', '#06B6D4', '#3B82F6', '#6366F1', '#8B5CF6',
-  '#EC4899', '#F43F5E', '#1C1917', '#44403C', '#FDE68A', '#BFDBFE',
+  '#000000', '#FFFFFF', '#EF4444', '#F97316', '#F59E0B',
+  '#10B981', '#06B6D4', '#3B82F6', '#6366F1', '#8B5CF6',
+  '#EC4899', '#64748B'
 ];
-
-const CANVAS_PRESETS = [
-  { name: 'Instagram Post', w: 1080, h: 1080, icon: '📸' },
-  { name: 'Instagram Story', w: 1080, h: 1920, icon: '📱' },
-  { name: 'YouTube Thumbnail', w: 1280, h: 720, icon: '▶️' },
-  { name: 'Facebook Post', w: 1200, h: 630, icon: '👥' },
-  { name: 'Twitter/X Post', w: 1600, h: 900, icon: '🐦' },
-  { name: 'Presentation 16:9', w: 1920, h: 1080, icon: '🖥️' },
-  { name: 'A4 Portrait', w: 2480, h: 3508, icon: '📄' },
-  { name: 'A4 Landscape', w: 3508, h: 2480, icon: '📃' },
-  { name: 'Poster', w: 1587, h: 2245, icon: '🪧' },
-  { name: 'Business Card', w: 1050, h: 600, icon: '💳' },
-  { name: 'Logo', w: 500, h: 500, icon: '⭐' },
-  { name: 'Desktop Wallpaper', w: 2560, h: 1440, icon: '🖥️' },
-];
-
-type ToolType = 'select' | 'text' | 'shapes' | 'draw' | 'background' | 'resize';
-type ShapeKind = 'rect' | 'circle' | 'triangle' | 'line' | 'star' | 'polygon' | 'heart';
 
 /* ═══════════════════════════════════════════════
- *  Main Component
+ *  Helpers: Chunked Base64 (High Performance)
+ * ═══════════════════════════════════════════════ */
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const len = bytes.byteLength;
+  const chunkSize = 16384;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/* ═══════════════════════════════════════════════
+ *  Helper: Arrow Factory
+ * ═══════════════════════════════════════════════ */
+function createArrow(fromX: number, fromY: number, toX: number, toY: number, color = '#EF4444', width = 3): Group {
+  const line = new Line([fromX, fromY, toX, toY], {
+    stroke: color,
+    strokeWidth: width,
+    selectable: false,
+    evented: false,
+  });
+
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  const headLength = Math.max(14, width * 4);
+
+  const p1 = { x: toX, y: toY };
+  const p2 = {
+    x: toX - headLength * Math.cos(angle - Math.PI / 6),
+    y: toY - headLength * Math.sin(angle - Math.PI / 6),
+  };
+  const p3 = {
+    x: toX - headLength * Math.cos(angle + Math.PI / 6),
+    y: toY - headLength * Math.sin(angle + Math.PI / 6),
+  };
+
+  const head = new Polygon([p1, p2, p3], {
+    fill: color,
+    stroke: color,
+    strokeWidth: 1,
+    selectable: false,
+    evented: false,
+  });
+
+  const group = new Group([line, head], {
+    selectable: true,
+    evented: true,
+    hasControls: true,
+  }) as CustomFabricObject;
+  group.customData = { isArrow: true };
+  return group as unknown as Group;
+}
+
+/* ═══════════════════════════════════════════════
+ *  Helper: Native Hardware-Accelerated Filters
+ * ═══════════════════════════════════════════════ */
+function processImageFilters(
+  source: HTMLImageElement | HTMLCanvasElement,
+  brightness: number,
+  contrast: number,
+  saturation: number,
+  preset: FilterPreset
+): HTMLCanvasElement {
+  const off = document.createElement('canvas');
+  off.width = source.width;
+  off.height = source.height;
+  const ctx = off.getContext('2d');
+  if (!ctx) return off;
+
+  const b = 1 + brightness / 100;
+  const c = 1 + contrast / 100;
+  const s = 1 + saturation / 100;
+
+  ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
+  ctx.drawImage(source, 0, 0);
+  ctx.filter = 'none';
+
+  if (preset === 'none') {
+    return off;
+  }
+
+  const imgData = ctx.getImageData(0, 0, off.width, off.height);
+  const d = imgData.data;
+
+  if (preset === 'grayscale') {
+    for (let i = 0; i < d.length; i += 4) {
+      const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      d[i] = g;
+      d[i + 1] = g;
+      d[i + 2] = g;
+    }
+  } else if (preset === 'bw') {
+    for (let i = 0; i < d.length; i += 4) {
+      const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const val = g > 130 ? 255 : 0;
+      d[i] = val;
+      d[i + 1] = val;
+      d[i + 2] = val;
+    }
+  } else if (preset === 'clean') {
+    for (let i = 0; i < d.length; i += 4) {
+      const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      let val = g;
+      if (g > 160) {
+        val = Math.min(255, g * 1.3);
+      } else if (g < 90) {
+        val = Math.max(0, g * 0.5);
+      } else {
+        val = (g - 90) * 1.4 + 45;
+      }
+      d[i] = val;
+      d[i + 1] = val;
+      d[i + 2] = val;
+    }
+  } else if (preset === 'enhance') {
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = Math.min(255, Math.max(0, ((d[i] - 128) * 1.25) + 128));
+      d[i + 1] = Math.min(255, Math.max(0, ((d[i + 1] - 128) * 1.25) + 128));
+      d[i + 2] = Math.min(255, Math.max(0, ((d[i + 2] - 128) * 1.25) + 128));
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return off;
+}
+
+/* ═══════════════════════════════════════════════
+ *  Helper: Rotate / Flip Canvas
+ * ═══════════════════════════════════════════════ */
+function rotateCanvas(source: HTMLCanvasElement | HTMLImageElement, clockwise: boolean): HTMLCanvasElement {
+  const off = document.createElement('canvas');
+  off.width = source.height;
+  off.height = source.width;
+  const ctx = off.getContext('2d');
+  if (!ctx) return off;
+
+  ctx.translate(off.width / 2, off.height / 2);
+  ctx.rotate((clockwise ? 90 : -90) * Math.PI / 180);
+  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+  return off;
+}
+
+function flipCanvas(source: HTMLCanvasElement | HTMLImageElement, horizontal: boolean): HTMLCanvasElement {
+  const off = document.createElement('canvas');
+  off.width = source.width;
+  off.height = source.height;
+  const ctx = off.getContext('2d');
+  if (!ctx) return off;
+
+  ctx.translate(horizontal ? off.width : 0, horizontal ? 0 : off.height);
+  ctx.scale(horizontal ? -1 : 1, horizontal ? 1 : -1);
+  ctx.drawImage(source, 0, 0);
+  return off;
+}
+
+/* ═══════════════════════════════════════════════
+ *  MAIN COMPONENT
  * ═══════════════════════════════════════════════ */
 export default function CanvasEditorScreen() {
   const setView = useAppStore((s) => s.setView);
+  const documents = useAppStore((s) => s.documents);
+  const selectedDocumentId = useAppStore((s) => s.ui.selectedDocumentId);
+  const setSelectedDocument = useAppStore((s) => s.setSelectedDocument);
 
-  // Core refs
+  // References
   const fabricRef = useRef<FabricCanvas | null>(null);
   const canvasElRef = useRef<HTMLCanvasElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const overlayInputRef = useRef<HTMLInputElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // State
-  const [sourceLoaded, setSourceLoaded] = useState(false);
-  const [canvasW, setCanvasW] = useState(1920);
-  const [canvasH, setCanvasH] = useState(1080);
-  const [zoom, setZoom] = useState(0.45);
-  const [activeTool, setActiveTool] = useState<ToolType>('select');
+  // Images state
+  const rawImageRef = useRef<HTMLImageElement | null>(null);
+  const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [hasImage, setHasImage] = useState(false);
+  const [currentDocId, setCurrentDocId] = useState<string | null>(null);
+  const [imageName, setImageName] = useState('image');
+  const [imgDimensions, setImgDimensions] = useState({ width: 0, height: 0 });
+
+  // Navigation & Tool Tabs
+  const [activeTab, setActiveTab] = useState<EditorTab>('crop');
+  const [zoom, setZoom] = useState(1);
+
+  // Selection
   const [selVer, setSelVer] = useState(0);
-  const [brushColor, setBrushColor] = useState('#EF4444');
-  const [brushSize, setBrushSize] = useState(5);
-  const [exporting, setExporting] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'PNG' | 'JPEG' | 'PDF'>('PNG');
-  const [exportQuality, setExportQuality] = useState(92);
-  const [filename, setFilename] = useState('design');
-  const [bgRemovingId, setBgRemovingId] = useState<string | null>(null);
-  const [customW, setCustomW] = useState(1920);
-  const [customH, setCustomH] = useState(1080);
-  const [grabbingText, setGrabbingText] = useState(false);
+  const bump = useCallback(() => setSelVer((v) => v + 1), []);
 
   // History
   const historyRef = useRef<string[]>([]);
   const historyIdxRef = useRef(-1);
   const isRestoringRef = useRef(false);
 
-  // Clipboard
-  const clipboardRef = useRef<FabricObject | null>(null);
+  // Color & Light Adjustments
+  const [brightness, setBrightness] = useState(0);
+  const [contrast, setContrast] = useState(0);
+  const [saturation, setSaturation] = useState(0);
+  const [activeFilter, setActiveFilter] = useState<FilterPreset>('none');
 
-  // Active Tool Ref to bypass stale closure in canvas event handlers
-  const activeToolRef = useRef<ToolType>(activeTool);
-  useEffect(() => {
-    activeToolRef.current = activeTool;
-  }, [activeTool]);
+  // Crop State
+  const [isCropping, setIsCropping] = useState(false);
+  const [selectedRatio, setSelectedRatio] = useState<number | null>(null);
+  const [cropBox, setCropBox] = useState({ x: 10, y: 10, w: 80, h: 80 }); // percentage
+  const [dragCropHandle, setDragCropHandle] = useState<string | null>(null);
+  const [cropDragStart, setCropDragStart] = useState<{ x: number; y: number } | null>(null);
 
-  // Bump selection - forces re-render so `sel` is re-evaluated
-  const bump = useCallback(() => setSelVer((v) => v + 1), []);
+  // Free Draw State
+  const [drawMode, setDrawMode] = useState<'pen' | 'highlighter'>('pen');
+  const [drawColor, setDrawColor] = useState('#EF4444');
+  const [drawWidth, setDrawWidth] = useState(4);
 
-  // Get active selection (re-evaluated each render)
-  const fc = fabricRef.current;
-  const sel = fc?.getActiveObject() as (FabricObject & Record<string, any>) | undefined;
-  void selVer; // selVer triggers re-render
-
-  /* ═══════════════════════════════════════════════
-   *  Canvas Initialization
-   * ═══════════════════════════════════════════════ */
-  useEffect(() => {
-    if (!canvasElRef.current || fabricRef.current) return;
-
-    const c = new FabricCanvas(canvasElRef.current, {
-      width: canvasW * zoom,
-      height: canvasH * zoom,
-      backgroundColor: '#ffffff',
-      preserveObjectStacking: true,
-      selection: true,
-      stopContextMenu: true,
-      fireRightClick: true,
-    });
-    c.setZoom(zoom);
-    fabricRef.current = c;
-
-    // Canva-like selection handles
-    FabricObject.prototype.set({
-      transparentCorners: false,
-      cornerColor: '#2563EB',
-      cornerStrokeColor: '#1D4ED8',
-      cornerStyle: 'circle',
-      cornerSize: 10,
-      borderColor: '#3B82F6',
-      borderDashArray: undefined,
-      borderScaleFactor: 1.8,
-      padding: 6,
-      rotatingPointOffset: 30,
-    });
-
-    // Events
-    const syncSel = () => bump();
-    c.on('selection:created', syncSel);
-    c.on('selection:updated', syncSel);
-    c.on('selection:cleared', syncSel);
-    c.on('object:modified', () => { syncSel(); saveHistory(); });
-    c.on('text:changed', syncSel);
-    c.on('object:added', () => { if (!isRestoringRef.current) saveHistory(); });
-
-    c.on('mouse:down', (options) => {
-      if (activeToolRef.current === 'text') {
-        // If clicking on an existing object, don't create new text
-        const target = c.findTarget(options.e);
-        if (target) return;
-
-        const pointer = c.getPointer(options.e);
-        const text = new Textbox('Type something...', {
-          left: pointer.x - 100,
-          top: pointer.y - 12,
-          width: 200,
-          fontSize: 24,
-          fontFamily: 'Inter',
-          fill: '#1F2937',
-          textAlign: 'left',
-          editable: true,
-        });
-        (text as any).customData = { id: `text_${Date.now()}` };
-        c.add(text);
-        c.setActiveObject(text);
-        setActiveTool('select');
-        c.renderAll();
-        setTimeout(() => {
-          text.enterEditing();
-          text.selectAll();
-        }, 50);
-      }
-    });
-
-    // Initial history
-    setTimeout(() => saveHistory(), 100);
-
-    return () => {
-      c.dispose();
-      fabricRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceLoaded]);
+  // Export State
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'PNG' | 'JPEG' | 'PDF'>('PNG');
+  const [exportQuality, setExportQuality] = useState(90);
+  const [isExporting, setIsExporting] = useState(false);
 
   /* ═══════════════════════════════════════════════
-   *  Load Google Fonts
-   * ═══════════════════════════════════════════════ */
-  useEffect(() => {
-    const fontFamilies = [
-      'Inter:wght@300;400;600;700;900',
-      'Roboto:wght@300;400;500;700',
-      'Open+Sans:wght@300;400;600;700',
-      'Montserrat:wght@300;400;600;700;900',
-      'Poppins:wght@300;400;500;600;700',
-      'Lato:wght@300;400;700',
-      'Playfair+Display:wght@400;700',
-      'Raleway:wght@300;400;600;700',
-      'Nunito:wght@300;400;600;700',
-      'Quicksand:wght@400;500;700',
-      'DM+Sans:wght@400;500;700',
-    ].join('&family=');
-    const link = document.createElement('link');
-    link.href = `https://fonts.googleapis.com/css2?family=${fontFamilies}&display=swap`;
-    link.rel = 'stylesheet';
-    document.head.appendChild(link);
-    return () => { document.head.removeChild(link); };
-  }, []);
-
-  /* ═══════════════════════════════════════════════
-   *  Load Image from Store
-   * ═══════════════════════════════════════════════ */
-  useEffect(() => {
-    const docState = useAppStore.getState();
-    const docs = docState.documents;
-    const activeDocId = docState.ui.selectedDocumentId;
-    let mainDoc = docs.find((d) => d.id === activeDocId && d.type === 'IMAGE');
-    if (!mainDoc) mainDoc = docs.find((d) => d.type === 'IMAGE');
-
-    if (mainDoc) {
-      const imgUrl = `docuflow:///${mainDoc.tempPath.replace(/\\/g, '/')}`;
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        setCanvasW(img.naturalWidth);
-        setCanvasH(img.naturalHeight);
-        setCustomW(img.naturalWidth);
-        setCustomH(img.naturalHeight);
-        // Auto-fit zoom
-        const vw = (viewportRef.current?.clientWidth || 900) - 80;
-        const vh = (viewportRef.current?.clientHeight || 600) - 80;
-        const fitZoom = Math.min(vw / img.naturalWidth, vh / img.naturalHeight, 1);
-        setZoom(fitZoom);
-        setSourceLoaded(true);
-
-        // Add image to canvas after fabric initializes
-        setTimeout(() => {
-          const c = fabricRef.current;
-          if (!c) return;
-          c.setDimensions({ width: img.naturalWidth * fitZoom, height: img.naturalHeight * fitZoom });
-          c.setZoom(fitZoom);
-
-          const fabricImg = new FabricImage(img, {
-            left: 0,
-            top: 0,
-            selectable: true,
-            evented: true,
-            hasControls: true,
-          });
-          (fabricImg as any).customData = { isBackground: true, id: 'bg_image' };
-          // Scale to fit canvas exactly
-          fabricImg.scaleToWidth(img.naturalWidth);
-          c.add(fabricImg);
-          c.sendObjectToBack(fabricImg);
-          c.renderAll();
-          saveHistory();
-        }, 200);
-      };
-      img.src = imgUrl;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ═══════════════════════════════════════════════
-   *  History / Undo / Redo
+   *  History: Save, Undo, Redo
    * ═══════════════════════════════════════════════ */
   const saveHistory = useCallback(() => {
     const c = fabricRef.current;
@@ -317,9 +336,10 @@ export default function CanvasEditorScreen() {
     const h = historyRef.current;
     const idx = historyIdxRef.current;
     historyRef.current = [...h.slice(0, idx + 1), json];
-    if (historyRef.current.length > 50) historyRef.current.shift();
+    if (historyRef.current.length > 40) historyRef.current.shift();
     historyIdxRef.current = historyRef.current.length - 1;
-  }, []);
+    bump();
+  }, [bump]);
 
   const handleUndo = useCallback(() => {
     const c = fabricRef.current;
@@ -350,232 +370,390 @@ export default function CanvasEditorScreen() {
   }, [bump]);
 
   /* ═══════════════════════════════════════════════
-   *  Zoom Controls
+   *  Refresh Background Image with Active Filters
    * ═══════════════════════════════════════════════ */
-  const applyZoom = useCallback((z: number) => {
+  const refreshFilteredBackground = useCallback(() => {
     const c = fabricRef.current;
-    if (!c) return;
-    const clamped = Math.max(0.1, Math.min(3, z));
-    c.setZoom(clamped);
-    c.setDimensions({ width: canvasW * clamped, height: canvasH * clamped });
-    setZoom(clamped);
-  }, [canvasW, canvasH]);
+    const baseCanvas = baseCanvasRef.current;
+    if (!c || !baseCanvas) return;
 
-  const zoomIn = () => applyZoom(zoom + 0.1);
-  const zoomOut = () => applyZoom(zoom - 0.1);
-  const zoomFit = () => {
-    const vw = (viewportRef.current?.clientWidth || 900) - 80;
-    const vh = (viewportRef.current?.clientHeight || 600) - 80;
-    applyZoom(Math.min(vw / canvasW, vh / canvasH, 1));
-  };
+    const filtered = processImageFilters(
+      baseCanvas,
+      brightness,
+      contrast,
+      saturation,
+      activeFilter
+    );
+
+    const fImg = new FabricImage(filtered, {
+      selectable: false,
+      evented: false,
+      hasControls: false,
+    });
+
+    c.backgroundImage = fImg;
+    c.renderAll();
+  }, [brightness, contrast, saturation, activeFilter]);
+
+  useEffect(() => {
+    refreshFilteredBackground();
+  }, [refreshFilteredBackground]);
 
   /* ═══════════════════════════════════════════════
-   *  Tool Switching
+   *  Update Dimensions & Fit Zoom
+   * ═══════════════════════════════════════════════ */
+  const fitZoomToViewport = useCallback((w: number, h: number) => {
+    const vp = viewportRef.current;
+    if (!vp) return 1;
+    const padW = vp.clientWidth - 60;
+    const padH = vp.clientHeight - 60;
+    if (padW <= 0 || padH <= 0 || w <= 0 || h <= 0) return 1;
+    const calc = Math.min(padW / w, padH / h, 1);
+    return Math.max(0.1, parseFloat(calc.toFixed(3)));
+  }, []);
+
+  const setCanvasImageAndDimensions = useCallback((canvasSource: HTMLCanvasElement, fit = true) => {
+    baseCanvasRef.current = canvasSource;
+    const w = canvasSource.width;
+    const h = canvasSource.height;
+    setImgDimensions({ width: w, height: h });
+
+    const applyToFabric = (c: FabricCanvas) => {
+      let newZoom = zoom;
+      if (fit) {
+        newZoom = fitZoomToViewport(w, h);
+        setZoom(newZoom);
+      }
+
+      c.setDimensions({ width: w * newZoom, height: h * newZoom });
+      c.setZoom(newZoom);
+      refreshFilteredBackground();
+    };
+
+    const c = fabricRef.current;
+    if (c) {
+      applyToFabric(c);
+    } else {
+      requestAnimationFrame(() => {
+        if (fabricRef.current) {
+          applyToFabric(fabricRef.current);
+        }
+      });
+    }
+  }, [zoom, fitZoomToViewport, refreshFilteredBackground]);
+
+  /* ═══════════════════════════════════════════════
+   *  Load Image from File or URL
+   * ═══════════════════════════════════════════════ */
+  const loadImageElement = useCallback((img: HTMLImageElement, name = 'image') => {
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) {
+      toast.error('Could not determine image dimensions');
+      return;
+    }
+
+    const off = document.createElement('canvas');
+    off.width = w;
+    off.height = h;
+    const ctx = off.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(img, 0, 0);
+
+    rawImageRef.current = img;
+    baseCanvasRef.current = off;
+    setImageName(name.replace(/\.[^/.]+$/, ''));
+    setImgDimensions({ width: w, height: h });
+    setHasImage(true);
+
+    // Reset adjustments
+    setBrightness(0);
+    setContrast(0);
+    setSaturation(0);
+    setActiveFilter('none');
+    setIsCropping(false);
+
+    // Apply to canvas
+    setCanvasImageAndDimensions(off, true);
+    setTimeout(() => {
+      saveHistory();
+    }, 50);
+  }, [setCanvasImageAndDimensions, saveHistory]);
+
+  const loadImageFromDataUrl = useCallback((dataUrl: string, name = 'image') => {
+    const img = new Image();
+    // Only set crossOrigin for remote http/https to prevent CORS block on data: or local URLs
+    if (dataUrl.startsWith('http://') || dataUrl.startsWith('https://')) {
+      img.crossOrigin = 'anonymous';
+    }
+    img.onload = () => loadImageElement(img, name);
+    img.onerror = () => toast.error('Failed to load image');
+    img.src = dataUrl;
+  }, [loadImageElement]);
+
+  const loadDocumentIntoCanvas = useCallback(async (doc: DocumentItem) => {
+    try {
+      setCurrentDocId(doc.id);
+      setSelectedDocument(doc.id);
+      let dataUrl = '';
+      if (window.electron?.readImageAsDataUrl) {
+        const res = await window.electron.readImageAsDataUrl(doc.tempPath);
+        if (res.success && res.data) {
+          dataUrl = res.data;
+        }
+      }
+      if (!dataUrl) {
+        dataUrl = `docuflow:///${doc.tempPath.replace(/\\/g, '/')}`;
+      }
+      loadImageFromDataUrl(dataUrl, doc.filename);
+    } catch (err) {
+      console.error('Failed to load document into canvas editor:', err);
+      toast.error('Failed to load image');
+    }
+  }, [loadImageFromDataUrl, setSelectedDocument]);
+
+  // Auto-load active image from shared session on mount or when selected document changes
+  useEffect(() => {
+    if (documents.length > 0) {
+      const activeDoc = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId && d.type === DocumentType.IMAGE))
+        || (!hasImage ? documents.find(d => d.type === DocumentType.IMAGE) : null);
+
+      if (activeDoc && activeDoc.id !== currentDocId) {
+        loadDocumentIntoCanvas(activeDoc);
+      }
+    }
+  }, [documents, selectedDocumentId, currentDocId, hasImage, loadDocumentIntoCanvas]);
+
+  const handleLoadFromFile = useCallback(async (file: File) => {
+    const registered = await registerUploadedFile(file);
+    if (registered) {
+      toast.success(`Image loaded: ${registered.filename}`);
+      loadDocumentIntoCanvas(registered);
+      return;
+    }
+
+    const filePath = (file as unknown as { path?: string }).path;
+    const fileName = file.name || (filePath ? filePath.split(/[\\/]/).pop() : 'image') || 'image';
+
+    if (filePath && window.electron?.readImageAsDataUrl) {
+      try {
+        const res = await window.electron.readImageAsDataUrl(filePath);
+        if (res.success && res.data) {
+          loadImageFromDataUrl(res.data, fileName);
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to read image via electron, falling back to FileReader', err);
+      }
+    }
+
+    if (file.size > 0) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          loadImageFromDataUrl(e.target.result as string, fileName);
+        }
+      };
+      reader.onerror = () => {
+        toast.error('Failed to read image file');
+      };
+      reader.readAsDataURL(file);
+    } else if (filePath) {
+      // 0-byte dummy file from electron dialog with path
+      loadImageFromDataUrl(`docuflow:///${filePath.replace(/\\/g, '/')}`, fileName);
+    } else {
+      toast.error('Failed to load image: file is empty');
+    }
+  }, [loadImageFromDataUrl, loadDocumentIntoCanvas]);
+
+  const handleOpenLocalFile = async () => {
+    try {
+      const res = await window.electron.showOpenDialog({
+        title: 'Open Image',
+        filters: [{ name: 'Image Files', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tiff'] }],
+        properties: ['openFile']
+      });
+      if (res.success && res.data && res.data.length > 0) {
+        const filePath = res.data[0];
+        const registered = await registerUploadedFile(filePath);
+        if (registered) {
+          toast.success(`Image loaded: ${registered.filename}`);
+          loadDocumentIntoCanvas(registered);
+        } else {
+          const fileName = filePath.split(/[\\/]/).pop() || 'image';
+          const dataRes = await window.electron.readImageAsDataUrl(filePath);
+          if (dataRes.success && dataRes.data) {
+            loadImageFromDataUrl(dataRes.data, fileName);
+          } else {
+            loadImageFromDataUrl(`docuflow:///${filePath.replace(/\\/g, '/')}`, fileName);
+          }
+        }
+      }
+    } catch {
+      fileInputRef.current?.click();
+    }
+  };
+
+
+  /* ═══════════════════════════════════════════════
+   *  Initialize Fabric Canvas (Mounted Once)
+   * ═══════════════════════════════════════════════ */
+  useEffect(() => {
+    if (!canvasElRef.current || fabricRef.current) return;
+
+    const c = new FabricCanvas(canvasElRef.current, {
+      width: 800,
+      height: 600,
+      backgroundColor: '#FFFFFF',
+      preserveObjectStacking: true,
+      selection: true,
+    });
+
+    FabricObject.prototype.set({
+      transparentCorners: false,
+      cornerColor: '#3B82F6',
+      cornerStrokeColor: '#1D4ED8',
+      cornerStyle: 'circle',
+      cornerSize: 10,
+      borderColor: '#60A5FA',
+      borderScaleFactor: 2,
+      padding: 4,
+    });
+
+    c.on('selection:created', bump);
+    c.on('selection:updated', bump);
+    c.on('selection:cleared', bump);
+    c.on('object:modified', () => { bump(); saveHistory(); });
+    c.on('object:added', () => { if (!isRestoringRef.current) saveHistory(); });
+    c.on('text:changed', bump);
+
+    fabricRef.current = c;
+
+    if (baseCanvasRef.current) {
+      const bc = baseCanvasRef.current;
+      const w = bc.width;
+      const h = bc.height;
+      const initialZoom = fitZoomToViewport(w, h);
+      setZoom(initialZoom);
+      c.setDimensions({ width: w * initialZoom, height: h * initialZoom });
+      c.setZoom(initialZoom);
+      const filtered = processImageFilters(bc, 0, 0, 0, 'none');
+      const fImg = new FabricImage(filtered, {
+        selectable: false,
+        evented: false,
+        hasControls: false,
+      });
+      c.backgroundImage = fImg;
+      c.renderAll();
+    }
+
+    return () => {
+      c.dispose();
+      fabricRef.current = null;
+    };
+  }, [bump, saveHistory, fitZoomToViewport]);
+
+  /* ═══════════════════════════════════════════════
+   *  Draw Tool Mode Setup
    * ═══════════════════════════════════════════════ */
   useEffect(() => {
     const c = fabricRef.current;
     if (!c) return;
-    if (activeTool === 'draw') {
+
+    if (activeTab === 'draw') {
       c.isDrawingMode = true;
       if (!c.freeDrawingBrush || !(c.freeDrawingBrush instanceof PencilBrush)) {
         c.freeDrawingBrush = new PencilBrush(c);
       }
-      c.freeDrawingBrush.color = brushColor;
-      c.freeDrawingBrush.width = brushSize;
+      if (drawMode === 'highlighter') {
+        // Semi-transparent highlighter brush
+        c.freeDrawingBrush.color = drawColor + '55'; // 33% alpha
+        c.freeDrawingBrush.width = Math.max(16, drawWidth * 2.5);
+      } else {
+        c.freeDrawingBrush.color = drawColor;
+        c.freeDrawingBrush.width = drawWidth;
+      }
     } else {
       c.isDrawingMode = false;
     }
     c.renderAll();
-  }, [activeTool, brushColor, brushSize]);
+  }, [activeTab, drawMode, drawColor, drawWidth]);
 
   /* ═══════════════════════════════════════════════
-   *  Object Property Update Helper
+   *  Clipboard Paste & Keyboard Shortcuts
    * ═══════════════════════════════════════════════ */
-  const updateProp = useCallback((key: string, value: any) => {
-    const c = fabricRef.current;
-    const obj = c?.getActiveObject();
-    if (!obj || !c) return;
-    (obj as any).set(key, value);
-    obj.setCoords();
-    c.renderAll();
-    bump();
-  }, [bump]);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA';
 
-  const updateScale = useCallback((dim: 'w' | 'h', value: number) => {
-    const obj = fabricRef.current?.getActiveObject();
-    if (!obj) return;
-    const v = Math.max(5, value);
-    if (dim === 'w') {
-      obj.set('scaleX', v / (obj.width || 1));
-    } else {
-      obj.set('scaleY', v / (obj.height || 1));
-    }
-    obj.setCoords();
-    fabricRef.current?.renderAll();
-    bump();
-  }, [bump]);
-
-  /* ═══════════════════════════════════════════════
-   *  Add Objects
-   * ═══════════════════════════════════════════════ */
-  const addText = useCallback((preset?: 'heading' | 'subheading' | 'body') => {
-    const c = fabricRef.current;
-    if (!c) return;
-    const size = preset === 'heading' ? 64 : preset === 'subheading' ? 42 : 24;
-    const weight = preset === 'heading' || preset === 'subheading' ? 'bold' : 'normal';
-    const content = preset === 'heading' ? 'Add a heading' :
-                    preset === 'subheading' ? 'Add a subheading' :
-                    'Add body text';
-    const text = new Textbox(content, {
-      left: canvasW / 2 - 200,
-      top: canvasH / 2 - size,
-      width: 400,
-      fontSize: size,
-      fontFamily: 'Inter',
-      fontWeight: weight,
-      fill: '#1F2937',
-      textAlign: 'center',
-      editable: true,
-    });
-    (text as any).customData = { id: `text_${Date.now()}` };
-    c.add(text);
-    c.setActiveObject(text);
-    c.renderAll();
-    setActiveTool('select');
-    bump();
-    toast.success('Text added — double-click to edit');
-  }, [canvasW, canvasH, bump]);
-
-  const addShape = useCallback((kind: ShapeKind) => {
-    const c = fabricRef.current;
-    if (!c) return;
-    const cx = canvasW / 2;
-    const cy = canvasH / 2;
-    let obj: FabricObject;
-
-    switch (kind) {
-      case 'rect':
-        obj = new Rect({
-          left: cx - 100, top: cy - 75, width: 200, height: 150,
-          fill: '#3B82F6', stroke: '#1D4ED8', strokeWidth: 2, rx: 8, ry: 8,
-        });
-        (obj as any).customData = { id: `rect_${Date.now()}` };
-        break;
-      case 'circle':
-        obj = new Circle({
-          left: cx - 80, top: cy - 80, radius: 80,
-          fill: '#8B5CF6', stroke: '#7C3AED', strokeWidth: 2,
-        });
-        (obj as any).customData = { id: `circle_${Date.now()}` };
-        break;
-      case 'triangle':
-        obj = new Triangle({
-          left: cx - 80, top: cy - 70, width: 160, height: 140,
-          fill: '#F59E0B', stroke: '#D97706', strokeWidth: 2,
-        });
-        (obj as any).customData = { id: `tri_${Date.now()}` };
-        break;
-      case 'line':
-        obj = new Line([cx - 150, cy, cx + 150, cy], {
-          stroke: '#374151', strokeWidth: 3,
-        });
-        (obj as any).customData = { id: `line_${Date.now()}` };
-        break;
-      case 'star': {
-        const pts: { x: number; y: number }[] = [];
-        for (let i = 0; i < 10; i++) {
-          const r = i % 2 === 0 ? 80 : 35;
-          const a = (Math.PI / 5) * i - Math.PI / 2;
-          pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+      // Delete active object
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput) {
+        const c = fabricRef.current;
+        const activeObj = c?.getActiveObject() as CustomFabricObject | undefined;
+        if (activeObj && !activeObj.isEditing) {
+          e.preventDefault();
+          c?.remove(activeObj);
+          c?.discardActiveObject();
+          c?.renderAll();
+          bump();
+          saveHistory();
         }
-        obj = new Polygon(pts, {
-          fill: '#F59E0B', stroke: '#D97706', strokeWidth: 2,
-        });
-        (obj as any).customData = { id: `star_${Date.now()}` };
-        break;
       }
-      case 'heart': {
-        // Heart via polygon approximation
-        const hPts: { x: number; y: number }[] = [];
-        for (let t = 0; t <= 2 * Math.PI; t += 0.05) {
-          const x = 16 * Math.pow(Math.sin(t), 3);
-          const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
-          hPts.push({ x: cx + x * 5, y: cy + y * 5 });
-        }
-        obj = new Polygon(hPts, {
-          fill: '#EF4444', stroke: '#DC2626', strokeWidth: 2,
-        });
-        (obj as any).customData = { id: `heart_${Date.now()}` };
-        break;
-      }
-      case 'polygon':
-        // Hexagon
-        {
-          const hexPts: { x: number; y: number }[] = [];
-          for (let i = 0; i < 6; i++) {
-            const a = (Math.PI / 3) * i - Math.PI / 6;
-            hexPts.push({ x: cx + 80 * Math.cos(a), y: cy + 80 * Math.sin(a) });
-          }
-          obj = new Polygon(hexPts, {
-            fill: '#14B8A6', stroke: '#0D9488', strokeWidth: 2,
-          });
-          (obj as any).customData = { id: `hex_${Date.now()}` };
-        }
-        break;
-      default:
-        return;
-    }
-    c.add(obj);
-    c.setActiveObject(obj);
-    c.renderAll();
-    setActiveTool('select');
-    bump();
-    toast.success(`${kind} added`);
-  }, [canvasW, canvasH, bump]);
 
-  const handleAddImageOverlay = useCallback(() => {
-    overlayInputRef.current?.click();
-  }, []);
-
-  const handleOverlayFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const c = fabricRef.current;
-    if (!c) return;
-
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const dataUrl = ev.target?.result as string;
-      if (!dataUrl) return;
-      try {
-        const img = await FabricImage.fromURL(dataUrl, { crossOrigin: 'anonymous' });
-        // Scale to fit 50% of canvas width
-        const maxW = canvasW * 0.5;
-        if ((img.width || 100) > maxW) {
-          img.scaleToWidth(maxW);
+      // Undo / Redo
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) handleRedo();
+          else handleUndo();
+        } else if (e.key === 'y') {
+          e.preventDefault();
+          handleRedo();
+        } else if (e.key === 'd') {
+          e.preventDefault();
+          handleDuplicate();
         }
-        img.set({
-          left: canvasW / 2 - ((img.width || 100) * (img.scaleX || 1)) / 2,
-          top: canvasH / 2 - ((img.height || 100) * (img.scaleY || 1)) / 2,
-        });
-        (img as any).customData = { id: `img_${Date.now()}` };
-        c.add(img);
-        c.setActiveObject(img);
-        c.renderAll();
-        bump();
-        toast.success('Image added');
-      } catch {
-        toast.error('Failed to load image');
       }
     };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  }, [canvasW, canvasH, bump]);
+
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              if (ev.target?.result) {
+                loadImageFromDataUrl(ev.target.result as string, 'Pasted_Image');
+                toast.success('Loaded image from clipboard');
+              }
+            };
+            reader.readAsDataURL(file);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('paste', handlePaste);
+    };
+  });
 
   /* ═══════════════════════════════════════════════
-   *  Object Actions
+   *  Object Management: Duplicate, Delete, Layering
    * ═══════════════════════════════════════════════ */
-  const deleteSelected = useCallback(() => {
+  const fc = fabricRef.current;
+  const sel = fc?.getActiveObject() as CustomFabricObject | undefined;
+  void selVer;
+
+  const handleDeleteSelected = () => {
     const c = fabricRef.current;
     const obj = c?.getActiveObject();
     if (!obj || !c) return;
@@ -584,544 +762,1074 @@ export default function CanvasEditorScreen() {
     c.renderAll();
     bump();
     saveHistory();
-    toast.success('Deleted');
-  }, [bump, saveHistory]);
+    toast.success('Element removed');
+  };
 
-  const duplicateSelected = useCallback(() => {
+  const handleDuplicate = () => {
     const c = fabricRef.current;
     const obj = c?.getActiveObject();
     if (!obj || !c) return;
     obj.clone().then((cloned: FabricObject) => {
       cloned.set({
-        left: (obj.left || 0) + 30,
-        top: (obj.top || 0) + 30,
+        left: (obj.left || 0) + 20,
+        top: (obj.top || 0) + 20,
       });
-      (cloned as any).customData = { id: `dup_${Date.now()}` };
       c.add(cloned);
       c.setActiveObject(cloned);
       c.renderAll();
       bump();
       saveHistory();
-      toast.success('Duplicated');
     });
-  }, [bump, saveHistory]);
+  };
 
-  const bringForward = () => { const c = fabricRef.current; const o = c?.getActiveObject(); if (o && c) { c.bringObjectForward(o); c.renderAll(); } };
-  const sendBackward = () => { const c = fabricRef.current; const o = c?.getActiveObject(); if (o && c) { c.sendObjectBackwards(o); c.renderAll(); } };
-  const bringToFront = () => { const c = fabricRef.current; const o = c?.getActiveObject(); if (o && c) { c.bringObjectToFront(o); c.renderAll(); } };
-  const sendToBack = () => { const c = fabricRef.current; const o = c?.getActiveObject(); if (o && c) { c.sendObjectToBack(o); c.renderAll(); } };
-
-  const toggleLock = useCallback(() => {
-    const obj = sel;
-    if (!obj) return;
-    const locked = !obj.lockMovementX;
-    obj.set({
-      lockMovementX: locked,
-      lockMovementY: locked,
-      lockScalingX: locked,
-      lockScalingY: locked,
-      lockRotation: locked,
-      hasControls: !locked,
-      selectable: true,
-      evented: true,
-    });
-    fabricRef.current?.renderAll();
-    bump();
-    toast.success(locked ? 'Layer locked' : 'Layer unlocked');
-  }, [sel, bump]);
-
-  /* ═══════════════════════════════════════════════
-   *  Background Removal
-   * ═══════════════════════════════════════════════ */
-  const handleRemoveBG = useCallback(async () => {
+  const updateSelectedProp = (key: string, value: unknown) => {
     const c = fabricRef.current;
-    const obj = c?.getActiveObject();
-    if (!obj || !c || obj.type !== 'image') return;
-    const imgObj = obj as FabricImage;
-    const src = imgObj.getSrc();
-    if (!src) return;
+    const obj = c?.getActiveObject() as CustomFabricObject | undefined;
+    if (!obj || !c) return;
 
-    setBgRemovingId('active');
-    try {
-      const blob = await removeBackground(src);
-      const url = URL.createObjectURL(blob);
-      const newImg = await FabricImage.fromURL(url, { crossOrigin: 'anonymous' });
-      newImg.set({
-        left: imgObj.left,
-        top: imgObj.top,
-        scaleX: imgObj.scaleX,
-        scaleY: imgObj.scaleY,
-        angle: imgObj.angle,
-        opacity: imgObj.opacity,
+    if (obj.customData?.isArrow && (key === 'stroke' || key === 'fill') && (obj as unknown as Group).getObjects) {
+      (obj as unknown as Group).getObjects().forEach((child) => {
+        if (child instanceof Line) child.set('stroke', value as string);
+        if (child instanceof Polygon) {
+          child.set('fill', value as string);
+          child.set('stroke', value as string);
+        }
       });
-      (newImg as any).customData = (imgObj as any).customData;
-      c.remove(imgObj);
-      c.add(newImg);
-      c.setActiveObject(newImg);
-      c.renderAll();
-      bump();
-      saveHistory();
-      toast.success('Background removed!');
-    } catch (err) {
-      toast.error('Background removal failed');
-      console.error(err);
-    } finally {
-      setBgRemovingId(null);
+    } else {
+      obj.set(key as keyof FabricObject, value);
     }
-  }, [bump, saveHistory]);
 
-  /* ═══════════════════════════════════════════════
-   *  Grab Text (OCR & Layout Reconstruction)
-   * ═══════════════════════════════════════════════ */
-  const handleGrabText = useCallback(async () => {
-    const c = fabricRef.current;
-    const obj = c?.getActiveObject();
-    if (!obj || !c || obj.type !== 'image') return;
-    const imgObj = obj as FabricImage;
-
-    const imgElement = imgObj.getElement() as HTMLImageElement;
-    if (!imgElement) return;
-
-    setGrabbingText(true);
-    const toastId = toast.loading('Reconstructing text layers from image...');
-
-    try {
-      // 1. Draw image to temp canvas to retrieve pixel colors and bypass local protocol cross-origin policies
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = imgElement.naturalWidth || imgElement.width;
-      tempCanvas.height = imgElement.naturalHeight || imgElement.height;
-      const ctx = tempCanvas.getContext('2d');
-      if (!ctx) throw new Error('Could not get 2d context');
-      ctx.drawImage(imgElement, 0, 0);
-      const dataUrl = tempCanvas.toDataURL('image/png');
-
-      // 2. Dynamically import Tesseract.js
-      const Tesseract = (await import('tesseract.js')).default;
-
-      // 3. Run OCR
-      const result = await Tesseract.recognize(dataUrl, 'eng');
-      const { lines } = result.data as any;
-
-      if (!lines || lines.length === 0) {
-        toast.error('No text found in this image', { id: toastId });
-        return;
-      }
-
-      let textCount = 0;
-
-      lines.forEach((line: any) => {
-        const textStr = line.text.trim();
-        if (textStr.length < 2) return; // ignore random noise characters
-
-        const { x0, y0, x1, y1 } = line.bbox;
-        const w = x1 - x0;
-        const h = y1 - y0;
-
-        // Sample background color (average border pixels)
-        const bgRgb = (() => {
-          const samples = [
-            ctx.getImageData(Math.max(0, x0 - 4), Math.max(0, y0 - 4), 1, 1).data,
-            ctx.getImageData(Math.min(tempCanvas.width - 1, x1 + 4), Math.max(0, y0 - 4), 1, 1).data,
-            ctx.getImageData(Math.max(0, x0 - 4), Math.min(tempCanvas.height - 1, y1 + 4), 1, 1).data,
-            ctx.getImageData(Math.min(tempCanvas.width - 1, x1 + 4), Math.min(tempCanvas.height - 1, y1 + 4), 1, 1).data,
-          ];
-          let r = 0, g = 0, b = 0;
-          samples.forEach((s) => { r += s[0]; g += s[1]; b += s[2]; });
-          return `rgb(${Math.round(r / samples.length)}, ${Math.round(g / samples.length)}, ${Math.round(b / samples.length)})`;
-        })();
-
-        // Sample text color (find the sampled pixel with max distance from background)
-        const textColor = (() => {
-          const match = bgRgb.match(/\d+/g);
-          const bgR = match ? parseInt(match[0]) : 255;
-          const bgG = match ? parseInt(match[1]) : 255;
-          const bgB = match ? parseInt(match[2]) : 255;
-
-          let maxDist = -1;
-          let bestColor = 'rgb(0,0,0)';
-          const stepX = w / 6;
-          const stepY = h / 6;
-          for (let i = 1; i <= 5; i++) {
-            for (let j = 1; j <= 5; j++) {
-              const px = Math.round(x0 + i * stepX);
-              const py = Math.round(y0 + j * stepY);
-              const imgData = ctx.getImageData(px, py, 1, 1).data;
-              const r = imgData[0], g = imgData[1], b = imgData[2];
-              const dist = Math.sqrt(Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2));
-              if (dist > maxDist) {
-                maxDist = dist;
-                bestColor = `rgb(${r},${g},${b})`;
-              }
-            }
-          }
-          return bestColor;
-        })();
-
-        // 4. Overwrite text in image with the background color (Canva-like inpainting)
-        ctx.fillStyle = bgRgb;
-        ctx.fillRect(Math.max(0, x0 - 2), Math.max(0, y0 - 2), w + 4, h + 4);
-
-        // 5. Create active editable Textbox object
-        const textObj = new Textbox(textStr, {
-          left: imgObj.left + x0 * imgObj.scaleX,
-          top: imgObj.top + y0 * imgObj.scaleY,
-          width: w * imgObj.scaleX + 25,
-          fontSize: h * imgObj.scaleY * 0.85,
-          fontFamily: 'Inter',
-          fill: textColor,
-          textAlign: 'left',
-          editable: true,
-        });
-        (textObj as any).customData = { id: `text_${Date.now()}_${Math.random()}` };
-        c.add(textObj);
-        textCount++;
-      });
-
-      // 6. Update background image source to reflect covered texts
-      const erasedDataUrl = tempCanvas.toDataURL('image/png');
-      const newImgEl = new Image();
-      newImgEl.onload = () => {
-        imgObj.setElement(newImgEl);
-        c.renderAll();
-        saveHistory();
-        bump();
-      };
-      newImgEl.src = erasedDataUrl;
-
-      toast.success(`Converted ${textCount} text elements into editable text layers!`, { id: toastId });
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to grab text from image', { id: toastId });
-    } finally {
-      setGrabbingText(false);
-    }
-  }, [bump, saveHistory]);
-
-  /* ═══════════════════════════════════════════════
-   *  Canvas Resize
-   * ═══════════════════════════════════════════════ */
-  const handleResizeCanvas = useCallback((w: number, h: number) => {
-    if (w < 50 || h < 50) return;
-    const c = fabricRef.current;
-    if (!c) return;
-    setCanvasW(w);
-    setCanvasH(h);
-    setCustomW(w);
-    setCustomH(h);
-    c.setDimensions({ width: w * zoom, height: h * zoom });
+    obj.setCoords();
     c.renderAll();
-    toast.success(`Canvas: ${w}×${h}`);
-  }, [zoom]);
+    bump();
+    saveHistory();
+  };
 
   /* ═══════════════════════════════════════════════
-   *  Export
+   *  Rotate, Flip, and Crop Functions
    * ═══════════════════════════════════════════════ */
-  const handleExport = useCallback(async () => {
+  const handleRotate = (clockwise: boolean) => {
+    if (!baseCanvasRef.current) return;
+    const rotated = rotateCanvas(baseCanvasRef.current, clockwise);
+    setCanvasImageAndDimensions(rotated, true);
+    saveHistory();
+    toast.success(`Rotated 90° ${clockwise ? 'CW' : 'CCW'}`);
+  };
+
+  const handleFlip = (horizontal: boolean) => {
+    if (!baseCanvasRef.current) return;
+    const flipped = flipCanvas(baseCanvasRef.current, horizontal);
+    setCanvasImageAndDimensions(flipped, false);
+    saveHistory();
+    toast.success(`Flipped ${horizontal ? 'horizontally' : 'vertically'}`);
+  };
+
+  const handleApplyCrop = () => {
+    if (!baseCanvasRef.current) return;
+    const base = baseCanvasRef.current;
+
+    const sx = Math.max(0, Math.round((cropBox.x / 100) * base.width));
+    const sy = Math.max(0, Math.round((cropBox.y / 100) * base.height));
+    const sw = Math.min(base.width - sx, Math.round((cropBox.w / 100) * base.width));
+    const sh = Math.min(base.height - sy, Math.round((cropBox.h / 100) * base.height));
+
+    if (sw < 10 || sh < 10) {
+      toast.error('Crop selection too small');
+      return;
+    }
+
+    const cropped = document.createElement('canvas');
+    cropped.width = sw;
+    cropped.height = sh;
+    const ctx = cropped.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(base, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    // Shift existing annotations by crop offset
+    const c = fabricRef.current;
+    if (c) {
+      c.getObjects().forEach((obj) => {
+        obj.set({
+          left: (obj.left || 0) - sx,
+          top: (obj.top || 0) - sy,
+        });
+        obj.setCoords();
+      });
+    }
+
+    setCanvasImageAndDimensions(cropped, true);
+    setIsCropping(false);
+    setCropBox({ x: 10, y: 10, w: 80, h: 80 });
+    saveHistory();
+    toast.success('Crop applied');
+  };
+
+  /* ═══════════════════════════════════════════════
+   *  Add Text, Shapes, and Privacy Redaction
+   * ═══════════════════════════════════════════════ */
+  const handleAddText = () => {
     const c = fabricRef.current;
     if (!c) return;
-    setExporting(true);
+    const w = imgDimensions.width || 800;
+    const h = imgDimensions.height || 600;
+    const minDim = Math.min(w, h);
+    const fontSize = Math.max(16, Math.min(84, Math.round(minDim * 0.045)));
 
+    const text = new Textbox('Type something...', {
+      left: Math.round(w / 2 - Math.min(w * 0.25, 140)),
+      top: Math.round(h / 2 - fontSize),
+      width: Math.max(200, Math.round(w * 0.4)),
+      fontSize,
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fill: '#1E293B',
+      textAlign: 'center',
+      editable: true,
+    });
+    c.add(text);
+    c.setActiveObject(text);
+    c.renderAll();
+    saveHistory();
+    toast.success('Text added — double click to edit');
+  };
+
+  const handleAddRedaction = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    const w = imgDimensions.width || 800;
+    const h = imgDimensions.height || 600;
+    const rw = Math.max(140, Math.round(w * 0.28));
+    const rh = Math.max(32, Math.round(h * 0.065));
+
+    const box = new Rect({
+      left: Math.round((w - rw) / 2),
+      top: Math.round((h - rh) / 2),
+      width: rw,
+      height: rh,
+      fill: '#000000',
+      stroke: '#000000',
+      strokeWidth: 0,
+      rx: 3,
+      ry: 3,
+    }) as CustomFabricObject;
+    box.customData = { isRedact: true };
+    c.add(box);
+    c.setActiveObject(box);
+    c.renderAll();
+    saveHistory();
+    toast.success('Privacy redaction box added — position over private text');
+  };
+
+  const handleAddHighlightBox = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    const w = imgDimensions.width || 800;
+    const h = imgDimensions.height || 600;
+    const hw = Math.max(160, Math.round(w * 0.32));
+    const hh = Math.max(36, Math.round(h * 0.075));
+
+    const hl = new Rect({
+      left: Math.round((w - hw) / 2),
+      top: Math.round((h - hh) / 2),
+      width: hw,
+      height: hh,
+      fill: 'rgba(250, 204, 21, 0.32)',
+      stroke: '#EAB308',
+      strokeWidth: 2,
+      rx: 4,
+      ry: 4,
+    });
+    c.add(hl);
+    c.setActiveObject(hl);
+    c.renderAll();
+    saveHistory();
+    toast.success('Highlight box added');
+  };
+
+  const handleAddRectangle = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    const w = imgDimensions.width || 800;
+    const h = imgDimensions.height || 600;
+    const rw = Math.max(120, Math.round(w * 0.25));
+    const rh = Math.max(80, Math.round(h * 0.2));
+    const sw = Math.max(2, Math.round(Math.min(w, h) * 0.005));
+
+    const rect = new Rect({
+      left: Math.round((w - rw) / 2),
+      top: Math.round((h - rh) / 2),
+      width: rw,
+      height: rh,
+      fill: 'transparent',
+      stroke: '#EF4444',
+      strokeWidth: sw,
+      rx: 4,
+      ry: 4,
+    });
+    c.add(rect);
+    c.setActiveObject(rect);
+    c.renderAll();
+    saveHistory();
+  };
+
+  const handleAddCircle = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    const w = imgDimensions.width || 800;
+    const h = imgDimensions.height || 600;
+    const radius = Math.max(35, Math.round(Math.min(w, h) * 0.1));
+    const sw = Math.max(2, Math.round(Math.min(w, h) * 0.005));
+
+    const circle = new Circle({
+      left: Math.round(w / 2 - radius),
+      top: Math.round(h / 2 - radius),
+      radius,
+      fill: 'transparent',
+      stroke: '#3B82F6',
+      strokeWidth: sw,
+    });
+    c.add(circle);
+    c.setActiveObject(circle);
+    c.renderAll();
+    saveHistory();
+  };
+
+  const handleAddArrow = () => {
+    const c = fabricRef.current;
+    if (!c) return;
+    const w = imgDimensions.width || 800;
+    const h = imgDimensions.height || 600;
+    const len = Math.max(70, Math.round(Math.min(w, h) * 0.22));
+    const sw = Math.max(2, Math.round(Math.min(w, h) * 0.006));
+
+    const arrow = createArrow(
+      Math.round(w / 2 - len / 2),
+      Math.round(h / 2),
+      Math.round(w / 2 + len / 2),
+      Math.round(h / 2),
+      '#EF4444',
+      sw
+    );
+    c.add(arrow);
+    c.setActiveObject(arrow);
+    c.renderAll();
+    saveHistory();
+  };
+
+  /* ═══════════════════════════════════════════════
+   *  Export Handling
+   * ═══════════════════════════════════════════════ */
+  const handleExport = async () => {
+    const c = fabricRef.current;
+    if (!c || imgDimensions.width <= 0) return;
+
+    setIsExporting(true);
     try {
-      // Deselect, render at full res
       c.discardActiveObject();
-      const prevZoom = zoom;
-      c.setZoom(1);
-      c.setDimensions({ width: canvasW, height: canvasH });
       c.renderAll();
 
-      let dataUrl: string;
-      if (exportFormat === 'PDF') {
-        dataUrl = c.toDataURL({ format: 'png', multiplier: 1 });
-      } else {
-        dataUrl = c.toDataURL({
-          format: exportFormat.toLowerCase() as 'png' | 'jpeg',
-          quality: exportQuality / 100,
-          multiplier: 1,
-        });
-      }
-
-      // Restore zoom
-      c.setZoom(prevZoom);
-      c.setDimensions({ width: canvasW * prevZoom, height: canvasH * prevZoom });
-      c.renderAll();
+      const dataUrl = c.toDataURL({
+        format: exportFormat === 'JPEG' ? 'jpeg' : 'png',
+        quality: exportQuality / 100,
+        multiplier: 1 / zoom, // render at true 1:1 original pixel resolution
+      });
 
       if (exportFormat === 'PDF') {
-        // Build PDF
         const pdfDoc = await PDFDocument.create();
-        const page = pdfDoc.addPage([canvasW * 0.24, canvasH * 0.24]);
-        const pngBytes = new Uint8Array(atob(dataUrl.split(',')[1]).split('').map(c => c.charCodeAt(0)));
-        const pngImage = await pdfDoc.embedPng(pngBytes);
-        page.drawImage(pngImage, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
-        const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([pdfBytes as BlobPart], { type: 'application/pdf' });
-        const pdfDataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
+        const a4W = 595.28;
+        const a4H = 841.89;
+        const isLandscape = imgDimensions.width > imgDimensions.height;
+        const pageW = isLandscape ? a4H : a4W;
+        const pageH = isLandscape ? a4W : a4H;
+
+        const page = pdfDoc.addPage([pageW, pageH]);
+        const pngBytes = base64ToUint8Array(dataUrl.split(',')[1]);
+        const embeddedImage = await pdfDoc.embedPng(pngBytes);
+
+        const margin = 20;
+        const maxW = pageW - margin * 2;
+        const maxH = pageH - margin * 2;
+        const scale = Math.min(maxW / imgDimensions.width, maxH / imgDimensions.height);
+        const drawW = imgDimensions.width * scale;
+        const drawH = imgDimensions.height * scale;
+
+        page.drawImage(embeddedImage, {
+          x: (pageW - drawW) / 2,
+          y: (pageH - drawH) / 2,
+          width: drawW,
+          height: drawH,
         });
-        const base64 = pdfDataUrl.split(',')[1];
-        const result = await (window as any).electron.saveTempOutput(base64, `${filename}.pdf`);
-        if (result.success) {
-          const stats = await (window as any).electron.validateFile(result.data);
-          useAppStore.getState().updateOutputOptions({ filename: filename, format: OutputFormat.PDF });
-          useAppStore.getState().setProcessingStatus({
-            step: 'complete' as any,
-            progress: 100,
-            totalFiles: 1,
-            processedFiles: 1,
-            outputPath: result.data,
-            outputSize: stats.size,
-          } as any);
-          setView(AppView.SUCCESS);
-          toast.success('PDF exported');
+
+        const pdfBytes = await pdfDoc.save();
+        const b64 = uint8ArrayToBase64(new Uint8Array(pdfBytes));
+        const cleanName = imageName.endsWith('.pdf') ? imageName : `${imageName}.pdf`;
+
+        const res = await window.electron.saveFileFromBase64(
+          `data:application/pdf;base64,${b64}`,
+          cleanName,
+          [{ name: 'PDF Documents', extensions: ['pdf'] }]
+        );
+
+        if (res.success) {
+          toast.success(`PDF saved: ${res.data.split(/[\\/]/).pop()}`);
+          setIsExportModalOpen(false);
+        } else if (!res.error?.message?.includes('cancelled')) {
+          toast.error('Failed to save PDF');
         }
       } else {
-        const base64 = dataUrl.split(',')[1];
         const ext = exportFormat.toLowerCase();
-        const result = await (window as any).electron.saveTempOutput(base64, `${filename}.${ext}`);
-        if (result.success) {
-          const stats = await (window as any).electron.validateFile(result.data);
-          useAppStore.getState().updateOutputOptions({
-            filename: filename,
-            format: exportFormat === 'JPEG' ? OutputFormat.JPEG : OutputFormat.PNG,
-          });
-          useAppStore.getState().setProcessingStatus({
-            step: 'complete' as any,
-            progress: 100,
-            totalFiles: 1,
-            processedFiles: 1,
-            outputPath: result.data,
-            outputSize: stats.size,
-          } as any);
-          setView(AppView.SUCCESS);
-          toast.success(`${exportFormat} exported`);
+        const cleanName = imageName.endsWith(`.${ext}`) ? imageName : `${imageName}.${ext}`;
+
+        const res = await window.electron.saveFileFromBase64(
+          dataUrl,
+          cleanName,
+          [{ name: `${exportFormat} Image`, extensions: [ext] }]
+        );
+
+        if (res.success) {
+          toast.success(`Image saved: ${res.data.split(/[\\/]/).pop()}`);
+          setIsExportModalOpen(false);
+        } else if (!res.error?.message?.includes('cancelled')) {
+          toast.error('Failed to save image');
         }
       }
     } catch (err) {
-      console.error('Export error:', err);
+      console.error(err);
       toast.error('Export failed');
     } finally {
-      setExporting(false);
+      setIsExporting(false);
     }
-  }, [canvasW, canvasH, zoom, exportFormat, exportQuality, filename, setView]);
-
-  /* ═══════════════════════════════════════════════
-   *  Keyboard Shortcuts
-   * ═══════════════════════════════════════════════ */
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-
-      if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); e.preventDefault(); }
-      if (e.ctrlKey && e.key === 'z') { handleUndo(); e.preventDefault(); }
-      if (e.ctrlKey && e.key === 'y') { handleRedo(); e.preventDefault(); }
-      if (e.ctrlKey && e.key === 'd') { e.preventDefault(); duplicateSelected(); }
-      if (e.ctrlKey && e.key === 'c') {
-        const obj = fabricRef.current?.getActiveObject();
-        if (obj) { clipboardRef.current = obj; toast.success('Copied'); }
-      }
-      if (e.ctrlKey && e.key === 'v') {
-        const clip = clipboardRef.current;
-        if (clip) {
-          clip.clone().then((cloned: FabricObject) => {
-            cloned.set({ left: (clip.left || 0) + 30, top: (clip.top || 0) + 30 });
-            fabricRef.current?.add(cloned);
-            fabricRef.current?.setActiveObject(cloned);
-            fabricRef.current?.renderAll();
-            bump();
-            saveHistory();
-          });
-        }
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [deleteSelected, handleUndo, handleRedo, duplicateSelected, bump, saveHistory]);
-
-  /* ═══════════════════════════════════════════════
-   *  File Upload Handlers
-   * ═══════════════════════════════════════════════ */
-  const handleFilesDropped = (files: File[]) => {
-    const imgFile = files.find((f) => f.type.startsWith('image/'));
-    if (!imgFile) return;
-    loadImageFile(imgFile);
   };
 
-  const handleBrowseImage = () => fileInputRef.current?.click();
-
-  const handleUploadNew = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) loadImageFile(file);
-    e.target.value = '';
-  };
-
-  const loadImageFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      if (!dataUrl) return;
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        setCanvasW(img.naturalWidth);
-        setCanvasH(img.naturalHeight);
-        setCustomW(img.naturalWidth);
-        setCustomH(img.naturalHeight);
-        const vw = (viewportRef.current?.clientWidth || 900) - 80;
-        const vh = (viewportRef.current?.clientHeight || 600) - 80;
-        const fitZoom = Math.min(vw / img.naturalWidth, vh / img.naturalHeight, 1);
-        setZoom(fitZoom);
-        setSourceLoaded(true);
-
-        setTimeout(() => {
-          const c = fabricRef.current;
-          if (!c) return;
-          c.setDimensions({ width: img.naturalWidth * fitZoom, height: img.naturalHeight * fitZoom });
-          c.setZoom(fitZoom);
-          c.set('backgroundColor', '#ffffff');
-
-          const fabricImg = new FabricImage(img, {
-            left: 0, top: 0,
-            selectable: true, evented: true, hasControls: true,
-          });
-          (fabricImg as any).customData = { isBackground: true, id: 'bg_image' };
-          fabricImg.scaleToWidth(img.naturalWidth);
-          c.add(fabricImg);
-          c.sendObjectToBack(fabricImg);
-          c.renderAll();
-          saveHistory();
-        }, 200);
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Helper to get effective dimensions
-  const getEffW = (o: FabricObject) => Math.round((o.width || 0) * (o.scaleX || 1));
-  const getEffH = (o: FabricObject) => Math.round((o.height || 0) * (o.scaleY || 1));
-
   /* ═══════════════════════════════════════════════
-   *  RENDER: Upload Screen
-   * ═══════════════════════════════════════════════ */
-  if (!sourceLoaded) {
-    return (
-      <div className="h-full flex flex-col bg-bg-base text-text-primary">
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-border bg-bg-surface shrink-0">
-          <button onClick={() => setView(AppView.HOME)} className="p-2 hover:bg-bg-sunken rounded-md transition-fast text-text-secondary hover:text-text-primary">
-            <ArrowLeft size={18} />
-          </button>
-          <div>
-            <h1 className="text-lg font-bold">Image Editor</h1>
-            <p className="text-xs text-text-muted">Professional canvas-based image editor</p>
-          </div>
-        </div>
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="w-full max-w-xl text-center space-y-6">
-            <div className="w-24 h-24 mx-auto bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-3xl flex items-center justify-center shadow-lg transform hover:scale-105 transition-slow">
-              <Smile size={44} className="text-white" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold">Canvas Image Editor</h2>
-              <p className="text-text-secondary mt-2">
-                Drop your image to start editing. Add text, shapes, images &mdash; every element is independently selectable, resizable, and editable.
-              </p>
-            </div>
-            <DragDropZone onFilesDropped={handleFilesDropped} disabled={false} />
-            <div className="flex justify-center gap-3">
-              <Button variant="secondary" size="lg" onClick={handleBrowseImage}>
-                <FolderOpen size={20} /> Browse Image
-              </Button>
-            </div>
-          </div>
-        </div>
-        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadNew} />
-      </div>
-    );
-  }
-
-  /* ═══════════════════════════════════════════════
-   *  Left Tool Sidebar Items
-   * ═══════════════════════════════════════════════ */
-  const toolItems: { id: ToolType; icon: React.ReactNode; label: string }[] = [
-    { id: 'select', icon: <MousePointer2 size={18} />, label: 'Select' },
-    { id: 'text', icon: <Type size={18} />, label: 'Text' },
-    { id: 'shapes', icon: <Square size={18} />, label: 'Shapes' },
-    { id: 'draw', icon: <Pencil size={18} />, label: 'Draw' },
-    { id: 'background', icon: <Palette size={18} />, label: 'BG' },
-    { id: 'resize', icon: <Maximize2 size={18} />, label: 'Resize' },
-  ];
-
-  /* ═══════════════════════════════════════════════
-   *  RENDER: Editor
+   *  RENDER: Workspace & Overlay
    * ═══════════════════════════════════════════════ */
   return (
-    <div className="h-full flex flex-col bg-bg-base select-none overflow-hidden" style={{ minHeight: 0 }}>
-      {/* ─── Top Toolbar ─── */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#1A1A1D] text-white border-b border-[#2D2D30] shrink-0">
+    <div className="h-full flex flex-col bg-bg-base select-none overflow-hidden relative" style={{ minHeight: 0 }}>
+      {/* ─── Empty State / Upload Zone Overlay (Canvas stays mounted underneath) ─── */}
+      {!hasImage && (
+        <div className="absolute inset-0 z-40 bg-bg-base flex flex-col">
+          <div className="flex items-center gap-3 px-6 py-4 border-b border-border bg-bg-surface shrink-0">
+            <button
+              onClick={() => setView(AppView.HOME)}
+              className="p-2 hover:bg-bg-sunken rounded-md transition-fast text-text-secondary hover:text-text-primary"
+              title="Back to Home"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold">Image Editor</h1>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-accent/15 text-accent border border-accent/30 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                  Active Feature
+                </span>
+              </div>
+              <p className="text-xs text-text-muted">Crop, enhance, annotate, and markup your images</p>
+            </div>
+          </div>
+
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="w-full max-w-xl text-center space-y-6">
+              <div className="w-20 h-20 mx-auto bg-accent/10 border border-accent/20 rounded-2xl flex items-center justify-center text-accent shadow-sm">
+                <Pencil size={36} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">Open an Image to Edit</h2>
+                <p className="text-text-secondary mt-1 text-sm">
+                  Drop your image, browse from your computer, or paste a screenshot directly with <kbd className="px-1.5 py-0.5 bg-bg-sunken border border-border rounded text-xs font-mono">Ctrl+V</kbd>.
+                </p>
+              </div>
+
+              <DragDropZone
+                accept={['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.tif']}
+                onFilesDropped={(files) => {
+                  if (files.length > 0) {
+                    handleLoadFromFile(files[0]);
+                  }
+                }}
+                disabled={false}
+              />
+
+              <div className="flex justify-center gap-3">
+                <Button variant="primary" size="lg" onClick={handleOpenLocalFile}>
+                  <FolderOpen size={18} className="mr-2" /> Browse Image File
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ─── Top Header Bar ─── */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-[#18181B] text-white border-b border-[#27272A] shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={() => setView(AppView.HOME)} className="p-2 hover:bg-[#2D2D30] rounded-md transition-fast text-gray-400 hover:text-white" title="Exit Editor">
+          <button
+            onClick={() => {
+              const hasDocs = useAppStore.getState().documents.length > 0;
+              setView(hasDocs ? AppView.DOCUMENT_LIST : AppView.HOME);
+            }}
+            className="p-1.5 hover:bg-[#27272A] rounded-md transition-fast text-gray-400 hover:text-white"
+            title="Back to Documents"
+          >
             <ArrowLeft size={18} />
           </button>
           <div className="h-4 w-px bg-gray-700" />
+          <button
+            onClick={handleOpenLocalFile}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[#27272A] hover:bg-[#3F3F46] rounded-md transition-colors text-gray-200"
+            title="Open another image"
+          >
+            <FolderOpen size={14} /> Open Image
+          </button>
+          <button
+            onClick={() => {
+              if (rawImageRef.current) {
+                loadImageElement(rawImageRef.current, imageName);
+                toast.success('Reset to original image');
+              }
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[#27272A] hover:bg-[#3F3F46] rounded-md transition-colors text-gray-300 hover:text-white"
+            title="Reset all edits and return to original uncropped image"
+          >
+            <RotateCcw size={13} /> Reset
+          </button>
+          <div className="h-4 w-px bg-gray-700" />
+          <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-accent/20 border border-accent/40 text-accent text-xs font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+            Image Editor Active
+          </div>
+          <div className="h-4 w-px bg-gray-700" />
           <div>
-            <h2 className="text-sm font-bold truncate max-w-[200px]">{filename}</h2>
-            <p className="text-[10px] text-gray-400 font-mono">{canvasW}×{canvasH} px</p>
+            <h2 className="text-xs font-bold truncate max-w-[220px] text-gray-100">{imageName}</h2>
+            <p className="text-[10px] text-gray-400 font-mono">
+              {imgDimensions.width} × {imgDimensions.height} px
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <button onClick={handleUndo} className="p-1.5 hover:bg-[#2D2D30] rounded text-gray-400 hover:text-white disabled:opacity-20" title="Undo (Ctrl+Z)">
-            <Undo2 size={15} />
-          </button>
-          <button onClick={handleRedo} className="p-1.5 hover:bg-[#2D2D30] rounded text-gray-400 hover:text-white disabled:opacity-20" title="Redo (Ctrl+Y)">
-            <Redo2 size={15} />
-          </button>
-          <div className="h-4 w-px bg-gray-700 mx-1" />
-          <button onClick={zoomOut} className="p-1.5 hover:bg-[#2D2D30] rounded text-gray-400 hover:text-white">
-            <ZoomOut size={15} />
-          </button>
-          <span className="text-xs font-mono w-12 text-center text-gray-300">{Math.round(zoom * 100)}%</span>
-          <button onClick={zoomIn} className="p-1.5 hover:bg-[#2D2D30] rounded text-gray-400 hover:text-white">
-            <ZoomIn size={15} />
-          </button>
-          <button onClick={zoomFit} className="p-1.5 hover:bg-[#2D2D30] rounded text-gray-400 hover:text-white" title="Fit to Screen">
-            <Maximize2 size={15} />
-          </button>
+        {/* Undo / Redo & Zoom Controls */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-[#27272A] px-1 py-0.5 rounded-lg border border-[#3F3F46]">
+            <button
+              onClick={handleUndo}
+              disabled={historyIdxRef.current <= 0}
+              className="p-1.5 hover:bg-[#3F3F46] rounded text-gray-300 disabled:opacity-25 transition-colors"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo2 size={14} />
+            </button>
+            <button
+              onClick={handleRedo}
+              disabled={historyIdxRef.current >= historyRef.current.length - 1}
+              className="p-1.5 hover:bg-[#3F3F46] rounded text-gray-300 disabled:opacity-25 transition-colors"
+              title="Redo (Ctrl+Y)"
+            >
+              <Redo2 size={14} />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 bg-[#27272A] px-1.5 py-0.5 rounded-lg border border-[#3F3F46]">
+            <button
+              onClick={() => {
+                const n = Math.max(0.2, parseFloat((zoom - 0.15).toFixed(2)));
+                setZoom(n);
+                fabricRef.current?.setZoom(n);
+                fabricRef.current?.setDimensions({
+                  width: imgDimensions.width * n,
+                  height: imgDimensions.height * n
+                });
+              }}
+              className="p-1 hover:bg-[#3F3F46] rounded text-gray-300 transition-colors"
+              title="Zoom Out"
+            >
+              <ZoomOut size={14} />
+            </button>
+            <span className="text-[11px] font-mono w-11 text-center text-gray-200">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              onClick={() => {
+                const n = Math.min(3, parseFloat((zoom + 0.15).toFixed(2)));
+                setZoom(n);
+                fabricRef.current?.setZoom(n);
+                fabricRef.current?.setDimensions({
+                  width: imgDimensions.width * n,
+                  height: imgDimensions.height * n
+                });
+              }}
+              className="p-1 hover:bg-[#3F3F46] rounded text-gray-300 transition-colors"
+              title="Zoom In"
+            >
+              <ZoomIn size={14} />
+            </button>
+            <button
+              onClick={() => {
+                const fit = fitZoomToViewport(imgDimensions.width, imgDimensions.height);
+                setZoom(fit);
+                fabricRef.current?.setZoom(fit);
+                fabricRef.current?.setDimensions({
+                  width: imgDimensions.width * fit,
+                  height: imgDimensions.height * fit
+                });
+              }}
+              className="p-1 hover:bg-[#3F3F46] rounded text-gray-300 transition-colors"
+              title="Fit to Screen"
+            >
+              <Maximize2 size={13} />
+            </button>
+          </div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsExportModalOpen(true)}
+            className="font-bold text-xs bg-accent hover:bg-accent-hover text-white shadow-sm"
+          >
+            <Download size={14} className="mr-1.5" /> Export
+          </Button>
         </div>
       </div>
 
-      {/* ─── Body: Left + Canvas + Right ─── */}
+      {/* ── Document Switcher Bar ── */}
+      <DocumentSelectorBar
+        activeDocumentId={currentDocId || undefined}
+        onSelectDocument={loadDocumentIntoCanvas}
+        acceptedTypes={[DocumentType.IMAGE]}
+        title="Image Editor"
+      />
+
+      {/* ─── Main Content: Left Tools + Center Canvas ─── */}
       <div className="flex flex-1 overflow-hidden relative" style={{ minHeight: 0 }}>
-        {/* Left Tool Strip */}
-        <div className="w-16 bg-[#18181B] text-gray-400 border-r border-[#27272A] flex flex-col items-center py-4 gap-1.5 shrink-0">
-          {toolItems.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setActiveTool(t.id)}
-              className={`w-12 h-12 flex flex-col items-center justify-center rounded-lg transition-fast ${
-                activeTool === t.id ? 'bg-accent text-white shadow-md shadow-accent/20' : 'hover:bg-[#27272A] hover:text-white'
-              }`}
-              title={t.label}
-            >
-              {t.icon}
-              <span className="text-[9px] mt-1 font-medium leading-none">{t.label}</span>
-            </button>
-          ))}
-          <div className="flex-1" />
-          <button onClick={handleAddImageOverlay} className="w-12 h-12 flex flex-col items-center justify-center rounded-lg hover:bg-[#27272A] hover:text-white text-emerald-400" title="Add Image Overlay">
-            <ImagePlus size={18} />
-            <span className="text-[9px] mt-1 font-medium leading-none">Image</span>
-          </button>
+        {/* Left Side Tool Panel */}
+        <div className="w-72 bg-bg-surface border-r border-border flex flex-col shrink-0 overflow-y-auto select-none">
+          {/* Top Tabs */}
+          <div className="flex border-b border-border bg-bg-sunken p-1.5 gap-1 shrink-0">
+            {[
+              { id: 'crop' as EditorTab, label: 'Crop & Rotate', icon: <Crop size={14} /> },
+              { id: 'adjust' as EditorTab, label: 'Adjust', icon: <Sliders size={14} /> },
+              { id: 'text' as EditorTab, label: 'Text', icon: <Type size={14} /> },
+              { id: 'shapes' as EditorTab, label: 'Shapes', icon: <Square size={14} /> },
+              { id: 'draw' as EditorTab, label: 'Draw', icon: <Pencil size={14} /> },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.id === 'crop') setIsCropping(true);
+                  else setIsCropping(false);
+                }}
+                className={`flex-1 py-1.5 px-1 rounded-md text-[11px] font-semibold flex flex-col items-center gap-1 transition-fast ${
+                  activeTab === tab.id
+                    ? 'bg-bg-surface text-accent shadow-sm border border-border/50'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Tab Specific Content */}
+          <div className="p-4 space-y-4 flex-1">
+            {/* ── Tab: Crop & Rotate ── */}
+            {activeTab === 'crop' && (
+              <div className="space-y-4 animate-fade-in">
+                {/* Rotate & Flip */}
+                <div>
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2">
+                    Rotate & Flip
+                  </span>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    <button
+                      onClick={() => handleRotate(false)}
+                      className="p-2 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg flex flex-col items-center gap-1 text-[10px] font-medium text-text-secondary hover:text-text-primary transition-colors"
+                      title="Rotate 90° Counter-Clockwise"
+                    >
+                      <RotateCcw size={16} /> CCW
+                    </button>
+                    <button
+                      onClick={() => handleRotate(true)}
+                      className="p-2 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg flex flex-col items-center gap-1 text-[10px] font-medium text-text-secondary hover:text-text-primary transition-colors"
+                      title="Rotate 90° Clockwise"
+                    >
+                      <RotateCw size={16} /> CW
+                    </button>
+                    <button
+                      onClick={() => handleFlip(true)}
+                      className="p-2 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg flex flex-col items-center gap-1 text-[10px] font-medium text-text-secondary hover:text-text-primary transition-colors"
+                      title="Flip Horizontally"
+                    >
+                      <FlipHorizontal size={16} /> Flip H
+                    </button>
+                    <button
+                      onClick={() => handleFlip(false)}
+                      className="p-2 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg flex flex-col items-center gap-1 text-[10px] font-medium text-text-secondary hover:text-text-primary transition-colors"
+                      title="Flip Vertically"
+                    >
+                      <FlipVertical size={16} /> Flip V
+                    </button>
+                  </div>
+                </div>
+
+                {/* Aspect Ratio Presets */}
+                <div>
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2">
+                    Aspect Ratio
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {ASPECT_RATIOS.map((r) => (
+                      <button
+                        key={r.label}
+                        onClick={() => {
+                          setSelectedRatio(r.ratio);
+                          setIsCropping(true);
+                          if (r.ratio) {
+                            // Calculate centered box conforming to aspect ratio
+                            const imgW = imgDimensions.width;
+                            const imgH = imgDimensions.height;
+                            const imgRatio = imgW / imgH;
+                            let newW = 80;
+                            let newH = 80;
+                            if (r.ratio > imgRatio) {
+                              newH = (newW / r.ratio) * imgRatio;
+                            } else {
+                              newW = (newH * r.ratio) / imgRatio;
+                            }
+                            setCropBox({
+                              x: (100 - newW) / 2,
+                              y: (100 - newH) / 2,
+                              w: newW,
+                              h: newH,
+                            });
+                          }
+                        }}
+                        className={`p-2 border rounded-lg text-left transition-colors ${
+                          selectedRatio === r.ratio
+                            ? 'bg-accent/15 border-accent text-accent font-semibold'
+                            : 'bg-bg-sunken border-border hover:bg-bg-base text-text-secondary'
+                        }`}
+                      >
+                        <p className="text-xs">{r.label}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Crop Action Buttons */}
+                <div className="pt-2 border-t border-border space-y-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center py-2 text-xs font-bold"
+                    onClick={handleApplyCrop}
+                  >
+                    <Check size={14} className="mr-1.5" /> Apply Crop
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-center py-1.5 text-xs text-text-muted hover:text-text-secondary"
+                    onClick={() => {
+                      setIsCropping(false);
+                      setCropBox({ x: 0, y: 0, w: 100, h: 100 });
+                    }}
+                  >
+                    Cancel Crop
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Tab: Adjust & Filters ── */}
+            {activeTab === 'adjust' && (
+              <div className="space-y-4 animate-fade-in">
+                {/* 1-Click Document Presets */}
+                <div>
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2">
+                    Quick Presets
+                  </span>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { id: 'none' as FilterPreset, label: 'Original' },
+                      { id: 'enhance' as FilterPreset, label: 'Auto Enhance' },
+                      { id: 'clean' as FilterPreset, label: 'Clean Scan' },
+                      { id: 'bw' as FilterPreset, label: 'Crisp B&W' },
+                      { id: 'grayscale' as FilterPreset, label: 'Grayscale' },
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setActiveFilter(p.id)}
+                        className={`p-2 rounded-lg border text-xs text-left transition-colors font-medium ${
+                          activeFilter === p.id
+                            ? 'bg-accent text-white border-accent shadow-sm'
+                            : 'bg-bg-sunken border-border hover:bg-bg-base text-text-secondary'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Fine Sliders */}
+                <div className="space-y-3 pt-2 border-t border-border">
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block">
+                    Fine Adjustments
+                  </span>
+
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-text-secondary">Brightness</span>
+                      <span className="font-mono text-text-primary">{brightness > 0 ? `+${brightness}` : brightness}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-100}
+                      max={100}
+                      value={brightness}
+                      onChange={(e) => setBrightness(Number(e.target.value))}
+                      className="w-full accent-accent cursor-pointer"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-text-secondary">Contrast</span>
+                      <span className="font-mono text-text-primary">{contrast > 0 ? `+${contrast}` : contrast}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-100}
+                      max={100}
+                      value={contrast}
+                      onChange={(e) => setContrast(Number(e.target.value))}
+                      className="w-full accent-accent cursor-pointer"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-text-secondary">Saturation</span>
+                      <span className="font-mono text-text-primary">{saturation > 0 ? `+${saturation}` : saturation}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-100}
+                      max={100}
+                      value={saturation}
+                      onChange={(e) => setSaturation(Number(e.target.value))}
+                      className="w-full accent-accent cursor-pointer"
+                    />
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-center py-1.5 text-xs text-text-muted hover:text-text-primary"
+                    onClick={() => {
+                      setBrightness(0);
+                      setContrast(0);
+                      setSaturation(0);
+                      setActiveFilter('none');
+                    }}
+                  >
+                    Reset Adjustments
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Tab: Text ── */}
+            {activeTab === 'text' && (
+              <div className="space-y-4 animate-fade-in">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full justify-center py-2 text-xs font-bold"
+                  onClick={handleAddText}
+                >
+                  <Type size={14} className="mr-1.5" /> Add Text Box
+                </Button>
+
+                {sel && (sel.type === 'textbox' || sel.type === 'text') ? (
+                  <div className="p-3 bg-bg-sunken border border-border rounded-lg space-y-3">
+                    <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block">
+                      Edit Selected Text
+                    </span>
+
+                    {/* Font Size */}
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-text-secondary">Font Size</span>
+                        <span className="font-mono text-text-primary">{sel.fontSize || 24}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={10}
+                        max={96}
+                        value={sel.fontSize || 24}
+                        onChange={(e) => updateSelectedProp('fontSize', Number(e.target.value))}
+                        className="w-full accent-accent"
+                      />
+                    </div>
+
+                    {/* Style Toggles */}
+                    <div className="flex gap-1 items-center">
+                      <button
+                        onClick={() => updateSelectedProp('fontWeight', sel.fontWeight === 'bold' ? 'normal' : 'bold')}
+                        className={`p-1.5 rounded border text-xs font-bold transition-colors ${
+                          sel.fontWeight === 'bold' ? 'bg-accent text-white border-accent' : 'bg-bg-surface border-border text-text-secondary'
+                        }`}
+                      >
+                        <Bold size={13} />
+                      </button>
+                      <button
+                        onClick={() => updateSelectedProp('fontStyle', sel.fontStyle === 'italic' ? 'normal' : 'italic')}
+                        className={`p-1.5 rounded border text-xs font-bold transition-colors ${
+                          sel.fontStyle === 'italic' ? 'bg-accent text-white border-accent' : 'bg-bg-surface border-border text-text-secondary'
+                        }`}
+                      >
+                        <Italic size={13} />
+                      </button>
+                      <button
+                        onClick={() => updateSelectedProp('underline', !sel.underline)}
+                        className={`p-1.5 rounded border text-xs font-bold transition-colors ${
+                          sel.underline ? 'bg-accent text-white border-accent' : 'bg-bg-surface border-border text-text-secondary'
+                        }`}
+                      >
+                        <Underline size={13} />
+                      </button>
+                      <div className="w-px h-5 bg-border mx-1" />
+                      {(['left', 'center', 'right'] as const).map((align) => (
+                        <button
+                          key={align}
+                          onClick={() => updateSelectedProp('textAlign', align)}
+                          className={`p-1.5 rounded border text-xs transition-colors ${
+                            sel.textAlign === align ? 'bg-accent text-white border-accent' : 'bg-bg-surface border-border text-text-secondary'
+                          }`}
+                        >
+                          {align === 'left' ? <AlignLeft size={13} /> : align === 'center' ? <AlignCenter size={13} /> : <AlignRight size={13} />}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Color */}
+                    <div>
+                      <span className="text-xs text-text-secondary block mb-1">Color</span>
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        {PRESET_COLORS.map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => updateSelectedProp('fill', c)}
+                            className="w-5 h-5 rounded-full border border-border/60 hover:scale-110 transition-transform"
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                        <input
+                          type="color"
+                          value={String(sel.fill || '#000000')}
+                          onChange={(e) => updateSelectedProp('fill', e.target.value)}
+                          className="w-6 h-6 rounded cursor-pointer border border-border p-0"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-text-muted text-center italic py-2">
+                    Click &quot;Add Text Box&quot; or select any text to customize formatting.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* ── Tab: Shapes & Redact ── */}
+            {activeTab === 'shapes' && (
+              <div className="space-y-4 animate-fade-in">
+                {/* Privacy Redact Tool */}
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg space-y-2">
+                  <div className="flex items-center gap-1.5 text-red-400">
+                    <Shield size={14} />
+                    <span className="text-xs font-bold uppercase tracking-wider">Privacy Redaction</span>
+                  </div>
+                  <p className="text-[11px] text-text-secondary leading-snug">
+                    Cover private numbers, Aadhaar, names, or signatures with an unremovable blackout mask.
+                  </p>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center py-1.5 text-xs bg-red-600 hover:bg-red-700 text-white border-none"
+                    onClick={handleAddRedaction}
+                  >
+                    + Add Blackout Box
+                  </Button>
+                </div>
+
+                {/* Standard Shapes */}
+                <div>
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2">
+                    Document Callouts
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleAddHighlightBox}
+                      className="p-2.5 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg flex items-center gap-2 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors text-left"
+                    >
+                      <div className="w-4 h-3 bg-amber-400/40 border border-amber-500 rounded-sm" />
+                      Highlight Box
+                    </button>
+                    <button
+                      onClick={handleAddRectangle}
+                      className="p-2.5 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg flex items-center gap-2 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors text-left"
+                    >
+                      <Square size={14} className="text-red-400" />
+                      Box Outline
+                    </button>
+                    <button
+                      onClick={handleAddCircle}
+                      className="p-2.5 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg flex items-center gap-2 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors text-left"
+                    >
+                      <CircleIcon size={14} className="text-blue-400" />
+                      Circle
+                    </button>
+                    <button
+                      onClick={handleAddArrow}
+                      className="p-2.5 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg flex items-center gap-2 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors text-left"
+                    >
+                      <ArrowRight size={14} className="text-red-400" />
+                      Arrow
+                    </button>
+                  </div>
+                </div>
+
+                {/* Color for selected shape */}
+                {sel && sel.type !== 'textbox' && (
+                  <div className="p-3 bg-bg-sunken border border-border rounded-lg space-y-2">
+                    <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block">
+                      Shape Color
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      {PRESET_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => {
+                            if (sel.stroke) updateSelectedProp('stroke', c);
+                            else updateSelectedProp('fill', c);
+                          }}
+                          className="w-5 h-5 rounded-full border border-border/60 hover:scale-110 transition-transform"
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Tab: Draw & Pen ── */}
+            {activeTab === 'draw' && (
+              <div className="space-y-4 animate-fade-in">
+                <div>
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-2">
+                    Drawing Mode
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setDrawMode('pen')}
+                      className={`p-2.5 rounded-lg border text-xs flex items-center gap-2 font-medium transition-colors ${
+                        drawMode === 'pen'
+                          ? 'bg-accent/15 border-accent text-accent'
+                          : 'bg-bg-sunken border-border text-text-secondary'
+                      }`}
+                    >
+                      <Pencil size={15} /> Pen Ink
+                    </button>
+                    <button
+                      onClick={() => setDrawMode('highlighter')}
+                      className={`p-2.5 rounded-lg border text-xs flex items-center gap-2 font-medium transition-colors ${
+                        drawMode === 'highlighter'
+                          ? 'bg-accent/15 border-accent text-accent'
+                          : 'bg-bg-sunken border-border text-text-secondary'
+                      }`}
+                    >
+                      <Highlighter size={15} /> Highlighter
+                    </button>
+                  </div>
+                </div>
+
+                {/* Brush Width */}
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-text-secondary">Thickness</span>
+                    <span className="font-mono text-text-primary">{drawWidth}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={30}
+                    value={drawWidth}
+                    onChange={(e) => setDrawWidth(Number(e.target.value))}
+                    className="w-full accent-accent cursor-pointer"
+                  />
+                </div>
+
+                {/* Color */}
+                <div>
+                  <span className="text-xs text-text-secondary block mb-1.5">Color</span>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {PRESET_COLORS.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setDrawColor(c)}
+                        className={`w-6 h-6 rounded-full border transition-transform ${
+                          drawColor === c ? 'scale-125 border-accent ring-2 ring-accent/30' : 'border-border/60 hover:scale-110'
+                        }`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={drawColor}
+                      onChange={(e) => setDrawColor(e.target.value)}
+                      className="w-7 h-7 rounded cursor-pointer border border-border p-0"
+                    />
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-text-muted italic bg-bg-sunken p-2.5 rounded border border-border/60">
+                  Draw directly on the image with mouse or touch pen. Switch tabs when finished.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Center Canvas Viewport */}
         <div
           ref={viewportRef}
-          className="flex-1 bg-[#121214] overflow-auto flex items-center justify-center relative p-8"
+          className="flex-1 bg-[#121214] overflow-auto flex items-center justify-center relative p-8 select-none"
           style={{ minHeight: 0 }}
-          onClick={(e) => {
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files?.[0];
+            if (file) {
+              handleLoadFromFile(file);
+            }
+          }}
+          onWheel={(e) => {
+            if (e.ctrlKey || e.metaKey || e.altKey) {
+              e.preventDefault();
+              const delta = e.deltaY > 0 ? -0.1 : 0.1;
+              const next = Math.max(0.15, Math.min(3, parseFloat((zoom + delta).toFixed(2))));
+              setZoom(next);
+              fabricRef.current?.setZoom(next);
+              fabricRef.current?.setDimensions({
+                width: imgDimensions.width * next,
+                height: imgDimensions.height * next,
+              });
+            }
+          }}
+          onMouseDown={(e) => {
             if (e.target === viewportRef.current) {
               fabricRef.current?.discardActiveObject();
               fabricRef.current?.renderAll();
@@ -1129,416 +1837,310 @@ export default function CanvasEditorScreen() {
             }
           }}
         >
-          <div className="relative shadow-2xl" style={{ flexShrink: 0 }}>
+          {/* Canvas Wrapper */}
+          <div
+            className="relative shadow-2xl rounded overflow-hidden"
+            style={{
+              width: imgDimensions.width > 0 ? imgDimensions.width * zoom : 800,
+              height: imgDimensions.height > 0 ? imgDimensions.height * zoom : 600,
+            }}
+          >
             <canvas ref={canvasElRef} />
-          </div>
-        </div>
 
-        {/* Right Properties Panel */}
-        <div className="w-80 border-l border-border bg-bg-surface overflow-y-auto shrink-0 flex flex-col">
-          <div className="p-4 flex-1 space-y-5">
+            {/* ── Interactive Crop Overlay ── */}
+            {isCropping && (
+              <div
+                className="absolute inset-0 z-30 select-none cursor-crosshair"
+                onPointerMove={(e) => {
+                  if (!dragCropHandle || !cropDragStart) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  if (rect.width <= 0 || rect.height <= 0) return;
+                  const dx = ((e.clientX - cropDragStart.x) / rect.width) * 100;
+                  const dy = ((e.clientY - cropDragStart.y) / rect.height) * 100;
 
-            {/* ─── SELECTED OBJECT PROPERTIES ─── */}
-            {sel ? (
-              <div className="space-y-4 animate-fade-in-up">
-                {/* Type badge + Actions */}
-                <div className="flex items-center justify-between">
-                  <span className="px-2.5 py-1 bg-accent/15 text-accent text-[10px] font-bold uppercase rounded-full tracking-wider">
-                    {sel.type === 'textbox' ? 'Text' : sel.type === 'image' ? 'Image' : sel.type || 'Object'}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button onClick={duplicateSelected} className="p-1.5 hover:bg-accent/10 text-accent rounded transition-fast" title="Duplicate (Ctrl+D)">
-                      <Copy size={14} />
-                    </button>
-                    <button onClick={toggleLock} className={`p-1.5 rounded transition-fast ${sel.lockMovementX ? 'bg-amber-500/20 text-amber-500' : 'hover:bg-bg-sunken text-text-muted'}`} title="Lock/Unlock">
-                      {sel.lockMovementX ? <Lock size={14} /> : <Unlock size={14} />}
-                    </button>
-                    <button onClick={deleteSelected} className="p-1.5 hover:bg-red-500/10 text-red-400 rounded transition-fast" title="Delete (Del)">
-                      <Trash size={14} />
-                    </button>
+                  setCropBox((prev) => {
+                    let { x, y, w, h } = prev;
+
+                    if (dragCropHandle === 'move') {
+                      x = Math.max(0, Math.min(100 - w, x + dx));
+                      y = Math.max(0, Math.min(100 - h, y + dy));
+                    } else if (dragCropHandle === 'tl') {
+                      const nx = Math.max(0, Math.min(x + w - 5, x + dx));
+                      const ny = Math.max(0, Math.min(y + h - 5, y + dy));
+                      w = w - (nx - x);
+                      h = h - (ny - y);
+                      x = nx;
+                      y = ny;
+                    } else if (dragCropHandle === 'tr') {
+                      const ny = Math.max(0, Math.min(y + h - 5, y + dy));
+                      w = Math.max(5, Math.min(100 - x, w + dx));
+                      h = h - (ny - y);
+                      y = ny;
+                    } else if (dragCropHandle === 'bl') {
+                      const nx = Math.max(0, Math.min(x + w - 5, x + dx));
+                      w = w - (nx - x);
+                      h = Math.max(5, Math.min(100 - y, h + dy));
+                      x = nx;
+                    } else if (dragCropHandle === 'br') {
+                      w = Math.max(5, Math.min(100 - x, w + dx));
+                      h = Math.max(5, Math.min(100 - y, h + dy));
+                    }
+
+                    if (selectedRatio && dragCropHandle !== 'move') {
+                      const imgRatio = imgDimensions.width / imgDimensions.height;
+                      const targetPercentRatio = selectedRatio / imgRatio;
+                      h = Math.max(5, Math.min(100 - y, w / targetPercentRatio));
+                    }
+
+                    return { x, y, w, h };
+                  });
+                  setCropDragStart({ x: e.clientX, y: e.clientY });
+                }}
+                onPointerUp={() => {
+                  setDragCropHandle(null);
+                  setCropDragStart(null);
+                }}
+              >
+                {/* SVG shaded mask */}
+                <svg className="w-full h-full absolute inset-0 pointer-events-none">
+                  <defs>
+                    <mask id="crop-mask">
+                      <rect width="100%" height="100%" fill="white" />
+                      <rect
+                        x={`${cropBox.x}%`}
+                        y={`${cropBox.y}%`}
+                        width={`${cropBox.w}%`}
+                        height={`${cropBox.h}%`}
+                        fill="black"
+                      />
+                    </mask>
+                  </defs>
+                  <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" mask="url(#crop-mask)" />
+                </svg>
+
+                {/* Crop Box Rectangle */}
+                <div
+                  className="absolute border-2 border-accent cursor-move shadow-md"
+                  style={{
+                    left: `${cropBox.x}%`,
+                    top: `${cropBox.y}%`,
+                    width: `${cropBox.w}%`,
+                    height: `${cropBox.h}%`,
+                  }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    setDragCropHandle('move');
+                    setCropDragStart({ x: e.clientX, y: e.clientY });
+                  }}
+                >
+                  {/* Grid Lines */}
+                  <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-40">
+                    <div className="border-r border-b border-white" />
+                    <div className="border-r border-b border-white" />
+                    <div className="border-b border-white" />
+                    <div className="border-r border-b border-white" />
+                    <div className="border-r border-b border-white" />
+                    <div className="border-b border-white" />
+                    <div className="border-r border-b border-white" />
+                    <div className="border-r border-b border-white" />
+                    <div />
                   </div>
+
+                  {/* Corner Handles */}
+                  <div
+                    className="absolute -top-2 -left-2 w-4 h-4 bg-accent border-2 border-white rounded-full cursor-nwse-resize shadow"
+                    title="Resize Top-Left"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setDragCropHandle('tl');
+                      setCropDragStart({ x: e.clientX, y: e.clientY });
+                    }}
+                  />
+                  <div
+                    className="absolute -top-2 -right-2 w-4 h-4 bg-accent border-2 border-white rounded-full cursor-nesw-resize shadow"
+                    title="Resize Top-Right"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setDragCropHandle('tr');
+                      setCropDragStart({ x: e.clientX, y: e.clientY });
+                    }}
+                  />
+                  <div
+                    className="absolute -bottom-2 -left-2 w-4 h-4 bg-accent border-2 border-white rounded-full cursor-nesw-resize shadow"
+                    title="Resize Bottom-Left"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setDragCropHandle('bl');
+                      setCropDragStart({ x: e.clientX, y: e.clientY });
+                    }}
+                  />
+                  <div
+                    className="absolute -bottom-2 -right-2 w-4 h-4 bg-accent border-2 border-white rounded-full cursor-nwse-resize shadow"
+                    title="Resize Bottom-Right"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setDragCropHandle('br');
+                      setCropDragStart({ x: e.clientX, y: e.clientY });
+                    }}
+                  />
                 </div>
-
-                {/* ─── Transform ─── */}
-                <div className="bg-bg-sunken rounded-lg p-3 space-y-2.5">
-                  <h4 className="text-[10px] font-bold text-text-muted uppercase tracking-widest flex items-center gap-1.5">
-                    <Move size={11} /> Transform
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-0.5 block">X</label>
-                      <input type="number" value={Math.round(sel.left || 0)} onChange={(e) => updateProp('left', Number(e.target.value))}
-                        className="w-full px-2 py-1 bg-bg-base border border-border rounded text-xs text-text-primary outline-none focus:border-accent font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-0.5 block">Y</label>
-                      <input type="number" value={Math.round(sel.top || 0)} onChange={(e) => updateProp('top', Number(e.target.value))}
-                        className="w-full px-2 py-1 bg-bg-base border border-border rounded text-xs text-text-primary outline-none focus:border-accent font-mono" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-0.5 block">W</label>
-                      <input type="number" value={getEffW(sel)} onChange={(e) => updateScale('w', Number(e.target.value))}
-                        className="w-full px-2 py-1 bg-bg-base border border-border rounded text-xs text-text-primary outline-none focus:border-accent font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-0.5 block">H</label>
-                      <input type="number" value={getEffH(sel)} onChange={(e) => updateScale('h', Number(e.target.value))}
-                        className="w-full px-2 py-1 bg-bg-base border border-border rounded text-xs text-text-primary outline-none focus:border-accent font-mono" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-0.5 block flex items-center gap-1"><RotateCw size={10} /> Angle</label>
-                      <input type="number" value={Math.round(sel.angle || 0)} onChange={(e) => updateProp('angle', Number(e.target.value) % 360)}
-                        className="w-full px-2 py-1 bg-bg-base border border-border rounded text-xs text-text-primary outline-none focus:border-accent font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-0.5 block">Opacity</label>
-                      <input type="number" min={0} max={100} value={Math.round((sel.opacity ?? 1) * 100)} onChange={(e) => updateProp('opacity', Math.min(1, Math.max(0, Number(e.target.value) / 100)))}
-                        className="w-full px-2 py-1 bg-bg-base border border-border rounded text-xs text-text-primary outline-none focus:border-accent font-mono" />
-                    </div>
-                  </div>
-                  <input type="range" min={0} max={100} value={Math.round((sel.opacity ?? 1) * 100)} onChange={(e) => updateProp('opacity', Number(e.target.value) / 100)} className="w-full accent-accent h-1" />
-                </div>
-
-                {/* Depth */}
-                <div>
-                  <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest block mb-1.5 flex items-center gap-1.5"><Layers size={11} /> Layer Order</label>
-                  <div className="grid grid-cols-4 gap-1">
-                    <button onClick={bringToFront} className="p-1.5 bg-bg-sunken hover:bg-bg-base border border-border rounded text-[10px] font-semibold transition-fast">Front</button>
-                    <button onClick={bringForward} className="p-1.5 bg-bg-sunken hover:bg-bg-base border border-border rounded text-[10px] font-semibold transition-fast">Up</button>
-                    <button onClick={sendBackward} className="p-1.5 bg-bg-sunken hover:bg-bg-base border border-border rounded text-[10px] font-semibold transition-fast">Down</button>
-                    <button onClick={sendToBack} className="p-1.5 bg-bg-sunken hover:bg-bg-base border border-border rounded text-[10px] font-semibold transition-fast">Back</button>
-                  </div>
-                </div>
-
-                {/* ─── TEXT Properties ─── */}
-                {(sel.type === 'textbox' || sel.type === 'i-text') && (
-                  <div className="space-y-3 border-t border-border pt-4">
-                    <h4 className="text-[10px] font-bold text-text-muted uppercase tracking-widest flex items-center gap-1.5"><Type size={11} /> Text</h4>
-                    {/* Font Family */}
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1 block">Font Family</label>
-                      <select value={sel.fontFamily || 'Inter'} onChange={(e) => updateProp('fontFamily', e.target.value)}
-                        className="w-full px-2 py-1.5 bg-bg-sunken border border-border rounded-md text-xs text-text-primary outline-none focus:border-accent"
-                        style={{ fontFamily: sel.fontFamily || 'Inter' }}>
-                        {FONT_OPTIONS.map((f) => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
-                      </select>
-                    </div>
-                    {/* Font Size */}
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1 block flex justify-between">
-                        <span>Font Size</span><span className="font-mono text-text-primary">{sel.fontSize || 24}px</span>
-                      </label>
-                      <input type="range" min={8} max={240} value={sel.fontSize || 24} onChange={(e) => updateProp('fontSize', Number(e.target.value))} className="w-full accent-accent" />
-                    </div>
-                    {/* Letter Spacing */}
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1 block flex justify-between">
-                        <span>Letter Spacing</span><span className="font-mono text-text-primary">{sel.charSpacing || 0}</span>
-                      </label>
-                      <input type="range" min={-200} max={1000} value={sel.charSpacing || 0} onChange={(e) => updateProp('charSpacing', Number(e.target.value))} className="w-full accent-accent" />
-                    </div>
-                    {/* Line Height */}
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1 block flex justify-between">
-                        <span>Line Height</span><span className="font-mono text-text-primary">{(sel.lineHeight || 1.16).toFixed(2)}</span>
-                      </label>
-                      <input type="range" min={50} max={300} value={Math.round((sel.lineHeight || 1.16) * 100)} onChange={(e) => updateProp('lineHeight', Number(e.target.value) / 100)} className="w-full accent-accent" />
-                    </div>
-                    {/* Style toggles */}
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1.5 block">Style & Alignment</label>
-                      <div className="flex gap-1 flex-wrap">
-                        {(['left', 'center', 'right'] as const).map((a) => (
-                          <button key={a} onClick={() => updateProp('textAlign', a)}
-                            className={`p-2 rounded border transition-fast ${sel.textAlign === a ? 'bg-accent text-white border-accent' : 'bg-bg-sunken border-border hover:bg-bg-base'}`}>
-                            {a === 'left' ? <AlignLeft size={14} /> : a === 'center' ? <AlignCenter size={14} /> : <AlignRight size={14} />}
-                          </button>
-                        ))}
-                        <div className="w-px bg-border mx-0.5" />
-                        <button onClick={() => updateProp('fontWeight', sel.fontWeight === 'bold' ? 'normal' : 'bold')}
-                          className={`p-2 rounded border transition-fast ${sel.fontWeight === 'bold' ? 'bg-accent text-white border-accent' : 'bg-bg-sunken border-border hover:bg-bg-base'}`}><Bold size={14} /></button>
-                        <button onClick={() => updateProp('fontStyle', sel.fontStyle === 'italic' ? 'normal' : 'italic')}
-                          className={`p-2 rounded border transition-fast ${sel.fontStyle === 'italic' ? 'bg-accent text-white border-accent' : 'bg-bg-sunken border-border hover:bg-bg-base'}`}><Italic size={14} /></button>
-                        <button onClick={() => updateProp('underline', !sel.underline)}
-                          className={`p-2 rounded border transition-fast ${sel.underline ? 'bg-accent text-white border-accent' : 'bg-bg-sunken border-border hover:bg-bg-base'}`}><Underline size={14} /></button>
-                      </div>
-                    </div>
-                    {/* Text Color */}
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1.5 block">Text Color</label>
-                      <div className="flex flex-wrap gap-1 mb-2">
-                        {PRESET_COLORS.map((c) => (
-                          <button key={c} onClick={() => updateProp('fill', c)}
-                            className={`w-5 h-5 rounded-full border transition-fast ${String(sel.fill) === c ? 'border-accent scale-125 ring-1 ring-accent' : 'border-border/50 hover:scale-110'}`}
-                            style={{ backgroundColor: c }} />
-                        ))}
-                      </div>
-                      <input type="color" value={String(sel.fill || '#000000')} onChange={(e) => updateProp('fill', e.target.value)}
-                        className="w-full h-7 rounded border border-border cursor-pointer bg-transparent" />
-                    </div>
-                  </div>
-                )}
-
-                {/* ─── SHAPE Properties ─── */}
-                {(sel.type === 'rect' || sel.type === 'circle' || sel.type === 'triangle' || sel.type === 'polygon' || sel.type === 'line') && (
-                  <div className="space-y-3 border-t border-border pt-4">
-                    <h4 className="text-[10px] font-bold text-text-muted uppercase tracking-widest flex items-center gap-1.5"><Square size={11} /> Shape</h4>
-                    {/* Fill Color */}
-                    {sel.type !== 'line' && (
-                      <div>
-                        <label className="text-[10px] text-text-muted mb-1.5 block">Fill Color</label>
-                        <div className="flex flex-wrap gap-1 mb-2">
-                          {PRESET_COLORS.map((c) => (
-                            <button key={c} onClick={() => updateProp('fill', c)}
-                              className={`w-5 h-5 rounded-full border transition-fast ${String(sel.fill) === c ? 'border-accent scale-125 ring-1 ring-accent' : 'border-border/50 hover:scale-110'}`}
-                              style={{ backgroundColor: c }} />
-                          ))}
-                        </div>
-                        <div className="flex gap-2">
-                          <input type="color" value={String(sel.fill || '#3B82F6')} onChange={(e) => updateProp('fill', e.target.value)}
-                            className="flex-1 h-7 rounded border border-border cursor-pointer bg-transparent" />
-                          <button onClick={() => updateProp('fill', 'transparent')}
-                            className="px-2.5 py-1 bg-bg-sunken border border-border rounded text-[10px] font-semibold text-text-muted hover:bg-bg-base transition-fast">No Fill</button>
-                        </div>
-                      </div>
-                    )}
-                    {/* Stroke Color */}
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1.5 block">Border Color</label>
-                      <div className="flex flex-wrap gap-1 mb-2">
-                        {PRESET_COLORS.slice(0, 12).map((c) => (
-                          <button key={c} onClick={() => updateProp('stroke', c)}
-                            className={`w-5 h-5 rounded-full border transition-fast ${String(sel.stroke) === c ? 'border-accent scale-125 ring-1 ring-accent' : 'border-border/50 hover:scale-110'}`}
-                            style={{ backgroundColor: c }} />
-                        ))}
-                      </div>
-                      <input type="color" value={String(sel.stroke || '#000000')} onChange={(e) => updateProp('stroke', e.target.value)}
-                        className="w-full h-7 rounded border border-border cursor-pointer bg-transparent" />
-                    </div>
-                    {/* Stroke Width */}
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1 block flex justify-between">
-                        <span>Border Width</span><span className="font-mono text-text-primary">{sel.strokeWidth || 0}px</span>
-                      </label>
-                      <input type="range" min={0} max={20} value={sel.strokeWidth || 0} onChange={(e) => updateProp('strokeWidth', Number(e.target.value))} className="w-full accent-accent" />
-                    </div>
-                    {/* Corner Radius for Rect */}
-                    {sel.type === 'rect' && (
-                      <div>
-                        <label className="text-[10px] text-text-muted mb-1 block flex justify-between">
-                          <span>Corner Radius</span><span className="font-mono text-text-primary">{sel.rx || 0}px</span>
-                        </label>
-                        <input type="range" min={0} max={100} value={sel.rx || 0} onChange={(e) => { updateProp('rx', Number(e.target.value)); updateProp('ry', Number(e.target.value)); }} className="w-full accent-accent" />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ─── IMAGE Properties ─── */}
-                {sel.type === 'image' && (
-                  <div className="space-y-3 border-t border-border pt-4">
-                    <h4 className="text-[10px] font-bold text-text-muted uppercase tracking-widest flex items-center gap-1.5"><ImagePlus size={11} /> Image</h4>
-                    {/* Flip */}
-                    <div className="flex gap-1.5">
-                      <button onClick={() => updateProp('flipX', !sel.flipX)}
-                        className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded border text-xs font-semibold transition-fast ${sel.flipX ? 'bg-accent/15 border-accent text-accent' : 'bg-bg-sunken border-border hover:bg-bg-base text-text-secondary'}`}>
-                        <FlipHorizontal size={13} /> Flip H
-                      </button>
-                      <button onClick={() => updateProp('flipY', !sel.flipY)}
-                        className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded border text-xs font-semibold transition-fast ${sel.flipY ? 'bg-accent/15 border-accent text-accent' : 'bg-bg-sunken border-border hover:bg-bg-base text-text-secondary'}`}>
-                        <FlipVertical size={13} /> Flip V
-                      </button>
-                    </div>
-                    {/* Remove BG */}
-                    <button onClick={handleRemoveBG} disabled={!!bgRemovingId}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:from-violet-700 hover:to-purple-700 rounded-md text-xs font-semibold shadow-md disabled:opacity-50 transition-fast">
-                      {bgRemovingId ? <><Loader2 size={14} className="animate-spin" /> Removing BG...</> : <><Wand2 size={14} /> Remove Background (AI)</>}
-                    </button>
-                    {/* Grab Text (OCR) */}
-                    <button onClick={handleGrabText} disabled={grabbingText}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-accent hover:bg-accent-hover text-white rounded-md text-xs font-semibold shadow-md disabled:opacity-50 transition-fast">
-                      {grabbingText ? <><Loader2 size={14} className="animate-spin" /> Grabbing Text...</> : <><Type size={14} /> Grab Text (Canva style OCR)</>}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* ─── NO SELECTION: Show tool panels ─── */
-              <div className="animate-fade-in-up">
-                {/* Text Tool Panel */}
-                {activeTool === 'text' && (
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-bold text-text-primary">Add Text</h3>
-                    <button onClick={() => addText('heading')} className="w-full text-left px-4 py-3 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg transition-fast">
-                      <p className="text-xl font-bold text-text-primary">Add a heading</p>
-                    </button>
-                    <button onClick={() => addText('subheading')} className="w-full text-left px-4 py-3 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg transition-fast">
-                      <p className="text-base font-semibold text-text-primary">Add a subheading</p>
-                    </button>
-                    <button onClick={() => addText('body')} className="w-full text-left px-4 py-3 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg transition-fast">
-                      <p className="text-sm text-text-secondary">Add body text</p>
-                    </button>
-                    <p className="text-[10px] text-text-muted text-center mt-2">Double-click any text on canvas to edit it inline</p>
-                  </div>
-                )}
-
-                {/* Shapes Panel */}
-                {activeTool === 'shapes' && (
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-bold text-text-primary">Add Shape</h3>
-                    <div className="grid grid-cols-3 gap-2">
-                      {([
-                        { kind: 'rect' as ShapeKind, icon: <Square size={22} />, label: 'Rectangle' },
-                        { kind: 'circle' as ShapeKind, icon: <CircleIcon size={22} />, label: 'Circle' },
-                        { kind: 'triangle' as ShapeKind, icon: <TriangleIcon size={22} />, label: 'Triangle' },
-                        { kind: 'line' as ShapeKind, icon: <Minus size={22} />, label: 'Line' },
-                        { kind: 'star' as ShapeKind, icon: <Star size={22} />, label: 'Star' },
-                        { kind: 'heart' as ShapeKind, icon: <Heart size={22} />, label: 'Heart' },
-                        { kind: 'polygon' as ShapeKind, icon: <Hexagon size={22} />, label: 'Hexagon' },
-                      ]).map((s) => (
-                        <button key={s.kind} onClick={() => addShape(s.kind)}
-                          className="p-3 bg-bg-sunken border border-border hover:bg-bg-base hover:scale-105 rounded-lg flex flex-col items-center justify-center text-text-secondary transition-fast text-[10px] font-semibold gap-1.5">
-                          {s.icon}
-                          {s.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Draw Panel */}
-                {activeTool === 'draw' && (
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-bold text-text-primary">Free Draw</h3>
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1.5 block font-semibold">Brush Color</label>
-                      <div className="flex flex-wrap gap-1.5 mb-2">
-                        {PRESET_COLORS.slice(0, 16).map((c) => (
-                          <button key={c} onClick={() => setBrushColor(c)}
-                            className={`w-6 h-6 rounded-full border-2 transition-fast ${brushColor === c ? 'border-accent scale-110 shadow-sm' : 'border-transparent hover:scale-105'}`}
-                            style={{ backgroundColor: c }} />
-                        ))}
-                      </div>
-                      <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} className="w-full h-8 rounded border border-border cursor-pointer bg-transparent" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1 block font-semibold">Brush Size: {brushSize}px</label>
-                      <input type="range" min={1} max={60} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-full accent-accent" />
-                    </div>
-                  </div>
-                )}
-
-                {/* Background Panel */}
-                {activeTool === 'background' && (
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-bold text-text-primary">Canvas Background</h3>
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-2 block font-semibold">Solid Colors</label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {PRESET_COLORS.map((c) => (
-                          <button key={c} onClick={() => { fabricRef.current?.set('backgroundColor', c); fabricRef.current?.renderAll(); }}
-                            className="w-7 h-7 rounded border border-border transition-fast hover:scale-105"
-                            style={{ backgroundColor: c }} />
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-text-muted mb-1 block font-semibold">Custom Color</label>
-                      <input type="color" value={String(fabricRef.current?.backgroundColor || '#ffffff')} onChange={(e) => { fabricRef.current?.set('backgroundColor', e.target.value); fabricRef.current?.renderAll(); }}
-                        className="w-full h-8 rounded border border-border cursor-pointer bg-transparent" />
-                    </div>
-                  </div>
-                )}
-
-                {/* Resize Panel */}
-                {activeTool === 'resize' && (
-                  <div className="space-y-4">
-                    <h3 className="text-sm font-bold text-text-primary">Canvas Size</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-text-muted mb-0.5 block">Width (px)</label>
-                        <input type="number" value={customW} onChange={(e) => setCustomW(Number(e.target.value))}
-                          className="w-full px-2 py-1.5 bg-bg-sunken border border-border rounded text-xs font-mono text-text-primary outline-none focus:border-accent" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-text-muted mb-0.5 block">Height (px)</label>
-                        <input type="number" value={customH} onChange={(e) => setCustomH(Number(e.target.value))}
-                          className="w-full px-2 py-1.5 bg-bg-sunken border border-border rounded text-xs font-mono text-text-primary outline-none focus:border-accent" />
-                      </div>
-                    </div>
-                    <button onClick={() => handleResizeCanvas(customW, customH)}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-accent hover:bg-accent-hover text-white rounded-md text-xs font-semibold transition-fast">
-                      <Maximize2 size={14} /> Apply Size
-                    </button>
-                    <div className="border-t border-border pt-4">
-                      <label className="text-[10px] text-text-muted mb-2 block font-semibold">Quick Presets</label>
-                      <div className="space-y-1.5">
-                        {CANVAS_PRESETS.map((p) => (
-                          <button key={p.name} onClick={() => { setCustomW(p.w); setCustomH(p.h); handleResizeCanvas(p.w, p.h); }}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 bg-bg-sunken hover:bg-bg-base border border-border rounded-lg transition-fast text-left">
-                            <span className="text-base">{p.icon}</span>
-                            <div className="flex-1">
-                              <span className="text-xs font-semibold text-text-primary">{p.name}</span>
-                              <span className="text-[10px] text-text-muted ml-2 font-mono">{p.w}×{p.h}</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Default Select - No Selection */}
-                {activeTool === 'select' && (
-                  <div className="text-center py-8 text-text-secondary bg-bg-sunken rounded-lg">
-                    <MousePointer2 className="mx-auto mb-2 opacity-35" size={24} />
-                    <p className="text-xs font-semibold">No element selected</p>
-                    <p className="text-[10px] text-text-muted mt-1">Click any element to edit it.<br />Double-click text to type inline.</p>
-                  </div>
-                )}
               </div>
             )}
           </div>
 
-          {/* ─── Export Footer ─── */}
-          <div className="p-4 border-t border-border bg-bg-sunken space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider">Export</h4>
-              <div className="flex bg-white rounded border border-border p-0.5">
+          {/* Floating Context Toolbar when an object is selected */}
+          {sel && !isCropping && (
+            <div className="absolute bottom-6 bg-[#18181B]/95 backdrop-blur-md border border-[#3F3F46] rounded-xl px-3 py-1.5 shadow-2xl flex items-center gap-2 text-white z-20 animate-fade-in-up">
+              <span className="text-[10px] uppercase font-bold text-gray-400 border-r border-gray-700 pr-2">
+                {sel.type === 'textbox' ? 'Text' : sel.customData?.isRedact ? 'Redact' : 'Shape'}
+              </span>
+              <button
+                onClick={handleDuplicate}
+                className="p-1.5 hover:bg-[#27272A] rounded text-gray-300 hover:text-white transition-colors"
+                title="Duplicate (Ctrl+D)"
+              >
+                <Copy size={14} />
+              </button>
+              <button
+                onClick={() => {
+                  const c = fabricRef.current;
+                  const o = c?.getActiveObject();
+                  if (o && c) {
+                    c.bringObjectToFront(o);
+                    c.renderAll();
+                  }
+                }}
+                className="p-1.5 hover:bg-[#27272A] rounded text-gray-300 hover:text-white transition-colors"
+                title="Bring to Front"
+              >
+                <Layers size={14} />
+              </button>
+              <div className="h-3 w-px bg-gray-700" />
+              <button
+                onClick={handleDeleteSelected}
+                className="p-1.5 hover:bg-red-500/20 rounded text-red-400 hover:text-red-300 transition-colors"
+                title="Delete (Del)"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ─── Export Modal ─── */}
+      {isExportModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-bg-surface border border-border rounded-xl shadow-2xl max-w-sm w-full p-5 space-y-4 animate-scale-in">
+            <div className="flex items-center justify-between pb-2 border-b border-border">
+              <h3 className="font-bold text-sm text-text-primary flex items-center gap-1.5">
+                <Download size={16} className="text-accent" /> Save & Export Image
+              </h3>
+              <button
+                onClick={() => setIsExportModalOpen(false)}
+                className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-sunken transition-colors"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Format Selector */}
+            <div>
+              <label className="text-xs font-semibold text-text-secondary block mb-1.5">File Format</label>
+              <div className="grid grid-cols-3 gap-1.5">
                 {(['PNG', 'JPEG', 'PDF'] as const).map((fmt) => (
-                  <button key={fmt} onClick={() => setExportFormat(fmt)}
-                    className={`px-2.5 py-1 rounded text-[10px] font-bold transition-fast ${exportFormat === fmt ? 'bg-accent text-white shadow-sm' : 'text-text-secondary hover:bg-bg-sunken'}`}>
+                  <button
+                    key={fmt}
+                    onClick={() => setExportFormat(fmt)}
+                    className={`py-2 text-xs font-bold rounded-lg border transition-colors ${
+                      exportFormat === fmt
+                        ? 'bg-accent text-white border-accent shadow-sm'
+                        : 'bg-bg-sunken border-border text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
                     {fmt}
                   </button>
                 ))}
               </div>
             </div>
+
+            {/* Filename */}
             <div>
-              <label className="text-[10px] text-text-muted mb-1 block">Filename</label>
-              <input type="text" value={filename} onChange={(e) => setFilename(e.target.value)}
-                className="w-full px-2.5 py-1.5 bg-white border border-border rounded text-xs text-text-primary outline-none focus:border-accent" />
+              <label className="text-xs font-semibold text-text-secondary block mb-1">File Name</label>
+              <input
+                type="text"
+                value={imageName}
+                onChange={(e) => setImageName(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-bg-sunken border border-border rounded-lg text-xs font-medium text-text-primary focus:outline-none focus:border-accent"
+              />
             </div>
+
+            {/* Quality for JPEG */}
             {exportFormat === 'JPEG' && (
               <div>
-                <label className="text-[10px] text-text-muted mb-1 block flex justify-between"><span>Quality</span><span className="font-mono">{exportQuality}%</span></label>
-                <input type="range" min={30} max={100} value={exportQuality} onChange={(e) => setExportQuality(Number(e.target.value))} className="w-full accent-accent" />
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-text-secondary font-medium">JPEG Quality</span>
+                  <span className="font-mono text-text-primary">{exportQuality}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={100}
+                  value={exportQuality}
+                  onChange={(e) => setExportQuality(Number(e.target.value))}
+                  className="w-full accent-accent cursor-pointer"
+                />
               </div>
             )}
-            <button onClick={handleExport} disabled={exporting}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-accent hover:bg-accent-hover text-white rounded font-semibold text-sm shadow disabled:opacity-50 transition-fast">
-              {exporting ? <><Loader2 size={15} className="animate-spin" /> Exporting...</> : <><Download size={15} /> Export</>}
-            </button>
+
+            {/* Output resolution note */}
+            <p className="text-[11px] text-text-muted bg-bg-sunken p-2 rounded border border-border/50">
+              Exports at native <strong className="text-text-primary">{imgDimensions.width} × {imgDimensions.height} px</strong> full resolution.
+            </p>
+
+            {/* Action Buttons */}
+            <div className="pt-2 border-t border-border flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="flex-1 justify-center py-2 text-xs"
+                onClick={() => setIsExportModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={isExporting}
+                className="flex-1 justify-center py-2 text-xs font-bold"
+                onClick={handleExport}
+              >
+                {isExporting ? (
+                  <>
+                    <Loader2 size={14} className="mr-1.5 animate-spin" /> Saving...
+                  </>
+                ) : (
+                  'Save File As...'
+                )}
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Hidden file inputs */}
-      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadNew} />
-      <input ref={overlayInputRef} type="file" accept="image/*" className="hidden" onChange={handleOverlayFileChange} />
+      {/* Hidden file input for native OS file selection fallback */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) {
+            handleLoadFromFile(f);
+          }
+        }}
+      />
     </div>
   );
 }

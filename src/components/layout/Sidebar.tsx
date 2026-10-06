@@ -1,15 +1,17 @@
-import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage, Layout, Camera, Pencil, FileText, Sheet } from 'lucide-react';
+import { ScanLine, Minimize, Merge, ArrowRightLeft, Scissors, Lock, Loader2, FileImage, Layout, Camera, Pencil, FileText, Sheet, Paintbrush } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../../store/appStore';
 import { ModalType, AppView, WorkflowType } from '../../types/UI.types';
 import { OutputFormat } from '../../types/Output.types';
 import { ScannerStatus } from '../../types/Scanner.types';
 import { DocumentType } from '../../types/Document.types';
+import { version as appVersion } from '../../../package.json';
 
 interface ActionButton {
   icon: React.ReactNode;
   label: string;
   action: () => void;
+  isActive?: boolean;
 }
 
 function Sidebar() {
@@ -23,6 +25,7 @@ function Sidebar() {
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
 
   const activeWorkflow = useAppStore((state) => state.ui.activeWorkflow);
+  const activeModal = useAppStore((state) => state.ui.modal.type);
   const currentView = useAppStore((state) => state.ui.currentView);
   const isLoading = useAppStore((state) => state.ui.isLoading);
   const scannerStatus = useAppStore((state) => state.scannerStatus.status);
@@ -35,13 +38,12 @@ function Sidebar() {
 
   const isDisabled = isProcessing;
 
+  const selectedDocumentId = useAppStore((state) => state.ui.selectedDocumentId);
+  const setSelectedDocument = useAppStore((state) => state.setSelectedDocument);
   const showConfirm = useAppStore((state) => state.showConfirm);
 
   const hasActiveProgress = 
-    (currentView === AppView.PDF_COMPOSE && documents.length > 0) ||
-    (currentView === AppView.IMAGE_EDIT && documents.some(d => d.type === DocumentType.IMAGE)) ||
-    (currentView === AppView.CANVAS_EDITOR) ||
-    (activeWorkflow !== WorkflowType.NONE);
+    (currentView === AppView.PDF_COMPOSE && documents.length > 0);
 
   const handleActionClick = async (targetView: AppView, targetWorkflow: WorkflowType, label: string, executeAction: () => void) => {
     if (currentView === targetView && (targetWorkflow === WorkflowType.NONE || activeWorkflow === targetWorkflow)) {
@@ -65,87 +67,119 @@ function Sidebar() {
 
   /**
    * When the user clicks a quick action in the sidebar:
-   *  - If no documents are uploaded yet → set the workflow and go to Home so
-   *    the user can drag-drop or browse at their own pace. No file dialog popup.
-   *  - If documents are already loaded → go directly to the Output Options screen.
+   *  - If no documents are uploaded yet → set the workflow and go to Home.
+   *  - If documents are already loaded → auto-select a compatible document and go to Output Options or Document List.
    */
   const handleWorkflowClick = (workflow: WorkflowType) => {
     if (documents.length === 0) {
-      // Just set workflow and navigate to Home — user will upload there
       setActiveWorkflow(workflow);
       setView(AppView.HOME);
       return;
     }
 
-    // Documents already loaded — validate and proceed
+    // Documents already loaded — select compatible document and proceed
     switch (workflow) {
       case WorkflowType.COMPRESS_IMAGE: {
-        if (documents.length !== 1 || documents[0].type === DocumentType.PDF) {
-          toast.error('Compress Image requires exactly one image. Remove others/PDFs first.');
+        const activeImg = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId && d.type === DocumentType.IMAGE))
+          || documents.find(d => d.type === DocumentType.IMAGE);
+
+        if (!activeImg) {
+          toast('Please select or upload an image to compress');
+          setActiveWorkflow(workflow);
+          setView(AppView.HOME);
           return;
         }
+
+        setSelectedDocument(activeImg.id);
         setActiveWorkflow(workflow);
-        const imgBase = documents[0].filename.substring(0, documents[0].filename.lastIndexOf('.')) || documents[0].filename;
-        const imgExt = documents[0].filename.toLowerCase();
+        const imgBase = activeImg.filename.substring(0, activeImg.filename.lastIndexOf('.')) || activeImg.filename;
+        const imgExt = activeImg.filename.toLowerCase();
         let defaultFormat = OutputFormat.JPEG;
         if (imgExt.endsWith('.png')) defaultFormat = OutputFormat.PNG;
         else if (imgExt.endsWith('.tiff') || imgExt.endsWith('.tif')) defaultFormat = OutputFormat.TIFF;
 
-        updateOutputOptions({ format: defaultFormat, compress: true, filename: `${imgBase}_compressed` });
+        updateOutputOptions({ documentId: activeImg.id, format: defaultFormat, compress: true, filename: `${imgBase}_compressed` });
         setView(AppView.OUTPUT_OPTIONS);
         break;
       }
 
       case WorkflowType.COMPRESS: {
-        if (documents.length !== 1 || documents[0].type !== DocumentType.PDF) {
-          toast.error('Compress requires exactly one PDF document. Clear others first.');
+        const activePdf = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId && d.type === DocumentType.PDF))
+          || documents.find(d => d.type === DocumentType.PDF);
+
+        if (!activePdf) {
+          toast('Please select or upload a PDF to compress');
+          setActiveWorkflow(workflow);
+          setView(AppView.HOME);
           return;
         }
+
+        setSelectedDocument(activePdf.id);
         setActiveWorkflow(WorkflowType.COMPRESS);
-        const compBase = documents[0].filename.substring(0, documents[0].filename.lastIndexOf('.')) || documents[0].filename;
-        updateOutputOptions({ format: OutputFormat.PDF, compress: true, filename: `${compBase}_compressed` });
+        const compBase = activePdf.filename.substring(0, activePdf.filename.lastIndexOf('.')) || activePdf.filename;
+        updateOutputOptions({ documentId: activePdf.id, format: OutputFormat.PDF, compress: true, filename: `${compBase}_compressed` });
         setView(AppView.OUTPUT_OPTIONS);
         break;
       }
 
-      case WorkflowType.MERGE:
-        if (!documents.every(d => d.type === DocumentType.PDF)) {
-          toast.error('Merge requires all documents to be PDFs. Remove non-PDF files first.');
-          return;
-        }
+      case WorkflowType.MERGE: {
+        const pdfs = documents.filter(d => d.type === DocumentType.PDF);
         setActiveWorkflow(WorkflowType.MERGE);
         updateOutputOptions({ mergeAsSingle: true, format: OutputFormat.PDF });
+        if (pdfs.length < 2) {
+          toast('Merge requires at least 2 PDF documents. Add more PDFs to merge.');
+        }
         setView(AppView.DOCUMENT_LIST);
         break;
+      }
 
-      case WorkflowType.CONVERT:
-        if (documents.length !== 1) {
-          toast.error('Convert requires exactly one document.');
-          return;
-        }
+      case WorkflowType.CONVERT: {
+        const activeDoc = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId)) || documents[0];
+        setSelectedDocument(activeDoc.id);
         setActiveWorkflow(WorkflowType.CONVERT);
+        const base = activeDoc.filename.substring(0, activeDoc.filename.lastIndexOf('.')) || activeDoc.filename;
+        updateOutputOptions({ documentId: activeDoc.id, filename: `${base}_converted` });
         setView(AppView.OUTPUT_OPTIONS);
         break;
+      }
 
-      case WorkflowType.SPLIT:
-        if (documents.length !== 1 || documents[0].type !== DocumentType.PDF) {
-          toast.error('Split requires exactly one PDF document.');
+      case WorkflowType.SPLIT: {
+        const activePdf = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId && d.type === DocumentType.PDF))
+          || documents.find(d => d.type === DocumentType.PDF);
+
+        if (!activePdf) {
+          toast('Please select or upload a PDF to split');
+          setActiveWorkflow(workflow);
+          setView(AppView.HOME);
           return;
         }
+
+        setSelectedDocument(activePdf.id);
         setActiveWorkflow(WorkflowType.SPLIT);
-        updateOutputOptions({ format: OutputFormat.PDF });
+        const splitBase = activePdf.filename.substring(0, activePdf.filename.lastIndexOf('.')) || activePdf.filename;
+        updateOutputOptions({ documentId: activePdf.id, format: OutputFormat.PDF, filename: `${splitBase}_split` });
         setView(AppView.OUTPUT_OPTIONS);
         break;
+      }
 
-      case WorkflowType.PROTECT:
-        if (documents.length !== 1 || documents[0].type !== DocumentType.PDF) {
-          toast.error('Protect requires exactly one PDF document.');
+      case WorkflowType.PROTECT: {
+        const activePdf = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId && d.type === DocumentType.PDF))
+          || documents.find(d => d.type === DocumentType.PDF);
+
+        if (!activePdf) {
+          toast('Please select or upload a PDF to protect');
+          setActiveWorkflow(workflow);
+          setView(AppView.HOME);
           return;
         }
+
+        setSelectedDocument(activePdf.id);
         setActiveWorkflow(WorkflowType.PROTECT);
-        updateOutputOptions({ format: OutputFormat.PDF, protection: { enabled: true } });
+        const protBase = activePdf.filename.substring(0, activePdf.filename.lastIndexOf('.')) || activePdf.filename;
+        updateOutputOptions({ documentId: activePdf.id, format: OutputFormat.PDF, protection: { enabled: true }, filename: `${protBase}_protected` });
         setView(AppView.OUTPUT_OPTIONS);
         break;
+      }
     }
   };
 
@@ -154,61 +188,91 @@ function Sidebar() {
       icon: <ScanLine size={20} />,
       label: 'Scan Document',
       action: () => openModal(ModalType.SCANNER),
+      isActive: scannerStatus === ScannerStatus.SCANNING || scannerStatus === ScannerStatus.CHECKING || activeModal === ModalType.SCANNER,
     },
     {
       icon: <Minimize size={20} />,
       label: 'Compress PDF',
       action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.COMPRESS, 'Compress PDF', () => handleWorkflowClick(WorkflowType.COMPRESS)),
+      isActive: activeWorkflow === WorkflowType.COMPRESS,
     },
     {
       icon: <FileImage size={20} />,
       label: 'Compress Image',
       action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.COMPRESS_IMAGE, 'Compress Image', () => handleWorkflowClick(WorkflowType.COMPRESS_IMAGE)),
+      isActive: activeWorkflow === WorkflowType.COMPRESS_IMAGE,
     },
     {
       icon: <Merge size={20} />,
       label: 'Merge PDFs',
       action: () => handleActionClick(AppView.DOCUMENT_LIST, WorkflowType.MERGE, 'Merge PDFs', () => handleWorkflowClick(WorkflowType.MERGE)),
+      isActive: activeWorkflow === WorkflowType.MERGE,
     },
     {
       icon: <ArrowRightLeft size={20} />,
       label: 'Convert Format',
       action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.CONVERT, 'Convert Format', () => handleWorkflowClick(WorkflowType.CONVERT)),
+      isActive: activeWorkflow === WorkflowType.CONVERT,
     },
     {
       icon: <Scissors size={20} />,
       label: 'Split PDF',
       action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.SPLIT, 'Split PDF', () => handleWorkflowClick(WorkflowType.SPLIT)),
+      isActive: activeWorkflow === WorkflowType.SPLIT,
     },
     {
       icon: <Lock size={20} />,
       label: 'Protect PDF',
       action: () => handleActionClick(AppView.OUTPUT_OPTIONS, WorkflowType.PROTECT, 'Protect PDF', () => handleWorkflowClick(WorkflowType.PROTECT)),
+      isActive: activeWorkflow === WorkflowType.PROTECT,
     },
     {
       icon: <Layout size={20} />,
       label: 'PDF Compose',
       action: () => handleActionClick(AppView.PDF_COMPOSE, WorkflowType.NONE, 'PDF Compose', () => setView(AppView.PDF_COMPOSE)),
+      isActive: currentView === AppView.PDF_COMPOSE,
     },
     {
       icon: <Camera size={20} />,
       label: 'Passport Photo',
-      action: () => handleActionClick(AppView.IMAGE_EDIT, WorkflowType.NONE, 'Passport Photo', () => setView(AppView.IMAGE_EDIT)),
+      action: () => handleActionClick(AppView.IMAGE_EDIT, WorkflowType.NONE, 'Passport Photo', () => {
+        const activeImg = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId && d.type === DocumentType.IMAGE)) || documents.find(d => d.type === DocumentType.IMAGE);
+        if (activeImg) setSelectedDocument(activeImg.id);
+        setView(AppView.IMAGE_EDIT);
+      }),
+      isActive: currentView === AppView.IMAGE_EDIT,
     },
     {
       icon: <Pencil size={20} />,
       label: 'Image Editor',
-      action: () => handleActionClick(AppView.CANVAS_EDITOR, WorkflowType.NONE, 'Image Editor', () => setView(AppView.CANVAS_EDITOR)),
+      action: () => handleActionClick(AppView.CANVAS_EDITOR, WorkflowType.NONE, 'Image Editor', () => {
+        const activeImg = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId && d.type === DocumentType.IMAGE)) || documents.find(d => d.type === DocumentType.IMAGE);
+        if (activeImg) setSelectedDocument(activeImg.id);
+        setView(AppView.CANVAS_EDITOR);
+      }),
+      isActive: currentView === AppView.CANVAS_EDITOR,
     },
     {
       icon: <FileText size={20} />,
       label: 'Offline OCR',
-      action: () => handleActionClick(AppView.OCR, WorkflowType.NONE, 'Offline OCR', () => setView(AppView.OCR)),
+      action: () => handleActionClick(AppView.OCR, WorkflowType.NONE, 'Offline OCR', () => {
+        const activeDoc = (selectedDocumentId && documents.find(d => d.id === selectedDocumentId)) || documents[0];
+        if (activeDoc) setSelectedDocument(activeDoc.id);
+        setView(AppView.OCR);
+      }),
+      isActive: currentView === AppView.OCR,
     },
     {
       icon: <Sheet size={20} />,
       label: 'Excel Editor',
       action: () => handleActionClick(AppView.EXCEL_EDITOR, WorkflowType.NONE, 'Excel Editor', () => setView(AppView.EXCEL_EDITOR)),
+      isActive: currentView === AppView.EXCEL_EDITOR || activeWorkflow === WorkflowType.EXCEL_EDIT,
+    },
+    {
+      icon: <Paintbrush size={20} />,
+      label: 'Sketch Canvas',
+      action: () => handleActionClick(AppView.SKETCH_EDITOR, WorkflowType.NONE, 'Sketch Canvas', () => setView(AppView.SKETCH_EDITOR)),
+      isActive: currentView === AppView.SKETCH_EDITOR,
     },
   ];
 
@@ -281,32 +345,80 @@ function Sidebar() {
             )}
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            {actions.map((action, index) => (
-              <button
-                key={index}
-                onClick={action.action}
-                disabled={isDisabled}
-                title={sidebarCollapsed ? action.label : undefined}
-                className={`flex items-center rounded-md transition-fast group w-full
-                  ${sidebarCollapsed ? 'justify-center p-3' : 'gap-3 p-3 text-left'}
-                  ${isDisabled 
-                    ? 'opacity-40 cursor-not-allowed' 
-                    : 'hover:bg-bg-sunken active:bg-bg-sunken'
-                  }
-                `}
-              >
-                <div className={`transition-fast ${isDisabled ? 'text-text-muted' : 'text-text-secondary group-hover:text-accent'}`}>
-                  {action.icon}
-                </div>
-                {!sidebarCollapsed && (
-                  <p className={`text-sm font-medium transition-fast ${isDisabled ? 'text-text-muted' : 'text-text-primary group-hover:text-accent'}`}>
-                    {action.label}
-                  </p>
-                )}
-              </button>
-            ))}
+          <div className="flex flex-col gap-1.5">
+            {actions.map((action, index) => {
+              const active = !!action.isActive;
+              return (
+                <button
+                  key={index}
+                  onClick={action.action}
+                  disabled={isDisabled}
+                  title={sidebarCollapsed ? action.label : undefined}
+                  className={`flex items-center rounded-lg transition-fast group w-full relative
+                    ${sidebarCollapsed ? 'justify-center p-3' : 'gap-3 px-3 py-2.5 text-left'}
+                    ${isDisabled 
+                      ? 'opacity-40 cursor-not-allowed' 
+                      : active
+                        ? 'bg-accent/15 border border-accent/40 shadow-xs'
+                        : 'hover:bg-bg-sunken active:bg-bg-sunken border border-transparent'
+                    }
+                  `}
+                >
+                  {/* Left accent indicator bar for active item */}
+                  {active && !sidebarCollapsed && (
+                    <span className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-accent rounded-r" />
+                  )}
+                  <div className={`transition-fast ${isDisabled ? 'text-text-muted' : active ? 'text-accent font-semibold' : 'text-text-secondary group-hover:text-accent'}`}>
+                    {action.icon}
+                  </div>
+                  {!sidebarCollapsed ? (
+                    <>
+                      <p className={`text-sm transition-fast truncate ${isDisabled ? 'text-text-muted' : active ? 'text-accent font-bold' : 'font-medium text-text-primary group-hover:text-accent'}`}>
+                        {action.label}
+                      </p>
+                      {active && (
+                        <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-semibold text-accent bg-accent/20 px-1.5 py-0.5 rounded-full border border-accent/30 animate-pulse">
+                          Active
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    active && (
+                      <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-accent ring-2 ring-white dark:ring-gray-900 animate-pulse" />
+                    )
+                  )}
+                </button>
+              );
+            })}
           </div>
+        )}
+      </div>
+
+      {/* Bottom Section: App Version in Quick Action Panel */}
+      <div
+        className={`border-t border-border/70 bg-bg-surface shrink-0 select-none ${
+          sidebarCollapsed
+            ? 'p-2 flex flex-col items-center justify-center'
+            : 'px-4 py-2.5 flex items-center justify-between'
+        }`}
+      >
+        {sidebarCollapsed ? (
+          <span
+            className="text-[10px] font-mono font-semibold text-text-muted hover:text-text-primary bg-bg-sunken px-1.5 py-0.5 rounded border border-border/50 transition-fast cursor-default"
+            title={`DocuFlow v${appVersion}`}
+          >
+            v{appVersion}
+          </span>
+        ) : (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-xs" title="Offline ready" />
+              <span className="text-xs text-text-muted font-medium">DocuFlow</span>
+            </div>
+            <span className="text-[11px] font-mono font-semibold text-text-muted hover:text-text-primary bg-bg-sunken px-2 py-0.5 rounded border border-border/50 transition-fast cursor-default">
+              v{appVersion}
+            </span>
+          </>
         )}
       </div>
     </div>

@@ -62,6 +62,7 @@ export interface OutputOptions {
   mergeAsSingle: boolean;       // Merge multiple files into one PDF
   splitPoints?: number[];       // Split points (page indices) for splitting
   workflow?: string;            // Active workflow type name
+  documentId?: string;          // Specific document ID being processed in single-doc workflow
   watermark?: WatermarkOptions; // Optional watermark options
 }
 

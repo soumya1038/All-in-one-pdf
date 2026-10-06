@@ -1,4 +1,4 @@
-import { CheckCircle2, FolderOpen, FileText, Home, Minimize, Scissors, Lock, ArrowRightLeft, Camera, Layout, Pencil } from 'lucide-react';
+import { CheckCircle2, FolderOpen, FileText, Home, Minimize, Scissors, Lock, ArrowRightLeft, Camera, Layout, Pencil, Layers } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
 import { AppView, WorkflowType } from '../types/UI.types';
@@ -68,17 +68,12 @@ function SuccessScreen() {
         if (result.data.length > 0) {
           toast.dismiss(loadingToastId);
           
-          // 2. Clear old session documents
-          for (const doc of documents) {
-            await window.electron.deleteFile(doc.id).catch(() => {});
-          }
-          clearDocuments();
-          
-          // 3. Add the new imported document to the store
+          // 2. Add the new imported document to the session and select it
           const importedDoc = result.data[0];
           useAppStore.getState().addDocuments([importedDoc]);
+          useAppStore.getState().setSelectedDocument(importedDoc.id);
           
-          // 4. Navigate and set options based on the chosen shortcut
+          // 3. Navigate and set options based on the chosen shortcut
           const fileBaseName = importedDoc.filename.substring(0, importedDoc.filename.lastIndexOf('.')) || importedDoc.filename;
           
           if (targetWorkflow === 'PDF_COMPOSE') {
@@ -344,9 +339,20 @@ function SuccessScreen() {
             </div>
           )}
 
-          {/* Start New */}
-          <div className="pt-4 border-t border-border">
-            <Button variant="ghost" onClick={handleStartNew}>
+          {/* Return or Start New */}
+          <div className="pt-4 border-t border-border flex flex-col sm:flex-row items-center justify-center gap-3">
+            {documents.length > 0 && (
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={() => setView(AppView.DOCUMENT_LIST)}
+                className="font-medium flex items-center gap-2"
+              >
+                <Layers size={16} />
+                Back to Documents ({documents.length})
+              </Button>
+            )}
+            <Button variant="ghost" size="md" onClick={handleStartNew} className="text-text-muted hover:text-text-primary">
               <Home size={16} />
               Start New Session
             </Button>

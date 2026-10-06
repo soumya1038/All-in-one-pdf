@@ -73,6 +73,61 @@ export class FileService {
   }
 
   /**
+   * Create a document item from a base64 or data URL
+   */
+  async createDocumentFromBase64(
+    base64Data: string,
+    filename: string,
+    type: DocumentType
+  ): Promise<Result<DocumentItem>> {
+    try {
+      const id = uuidv4();
+      const sanitized = sanitizeFilename(filename || `uploaded_${Date.now()}`);
+      const tempPath = getTempFilePath(`${id}_${sanitized}`);
+
+      const base64Clean = base64Data.replace(/^data:[^;]+;base64,/, '');
+      const buffer = Buffer.from(base64Clean, 'base64');
+      await writeFile(tempPath, buffer);
+
+      const stats = await stat(tempPath);
+      const size = stats.size;
+
+      const thumbnailPath = await this.createThumbnail(tempPath, id, type);
+      const pageCount = type === DocumentType.PDF ? await this.getPdfPageCount(tempPath) : 1;
+
+      const document: DocumentItem = {
+        id,
+        filename: sanitized,
+        type,
+        size,
+        pageCount,
+        thumbnailPath,
+        tempPath,
+        originalPath: tempPath,
+        edits: [],
+        createdAt: Date.now(),
+      };
+
+      FileService.documents.set(id, document);
+
+      return {
+        success: true,
+        data: document,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: ErrorCode.UNKNOWN_ERROR,
+          message: 'Failed to process image data',
+          detail: error instanceof Error ? error.message : 'Unknown error',
+          recoverable: true,
+        },
+      };
+    }
+  }
+
+  /**
    * Delete a document and its temp files
    */
   async deleteDocument(id: string): Promise<Result<void>> {

@@ -5,6 +5,7 @@ import { registerOutputHandlers } from './output.handler';
 import { registerSystemHandlers } from './system.handler';
 import { registerDocumentHandlers } from './document.handler';
 import { registerExcelHandlers } from './excel.handler';
+import { registerOcrHandlers } from './ocr.handler';
 
 /**
  * Register all IPC handlers
@@ -18,6 +19,7 @@ export function registerIpcHandlers(): void {
   registerSystemHandlers();
   registerDocumentHandlers();
   registerExcelHandlers();
+  registerOcrHandlers();
   
-  console.log('All IPC handlers registered');
+  console.log('[DocuFlow] All IPC handlers registered successfully, including OCR');
 }

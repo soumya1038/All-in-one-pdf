@@ -1,0 +1,290 @@
+@import '@excalidraw/excalidraw/index.css';
+
+/* Sketch Editor Main Container */
+.sketch-editor-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+  background: var(--bg-base, #ffffff);
+  overflow: hidden;
+}
+
+/* Document Tool Shelf on Top */
+.sketch-document-shelf {
+  background: var(--bg-surface, #ffffff);
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  z-index: 20;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.sketch-doc-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border, #e2e8f0);
+  background: var(--bg-base, #f8fafc);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.sketch-doc-card:hover {
+  border-color: var(--accent, #3b82f6);
+  background: var(--bg-surface, #ffffff);
+  transform: translateY(-1px);
+}
+
+/* Active / Ticked State */
+.sketch-doc-card.is-ticked {
+  border-color: #10b981; /* emerald / vibrant green */
+  background: rgba(16, 185, 129, 0.08);
+  box-shadow: 0 0 0 1.5px rgba(16, 185, 129, 0.35), 0 2px 5px rgba(16, 185, 129, 0.15);
+}
+
+.sketch-tick-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #10b981;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.4);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform: scale(1);
+}
+
+.sketch-unticked-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px dashed #94a3b8;
+  color: #64748b;
+  opacity: 0.6;
+}
+
+/* Excalidraw Canvas Wrap */
+.sketch-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.sketch-canvas-wrap .excalidraw {
+  width: 100%;
+  height: 100%;
+  font-family: inherit;
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  High-Contrast Precision Canvas Cursors (Clearly Visible on White Background)
+ * ═══════════════════════════════════════════════════════ */
+
+/* Universal High-Contrast Classic Crosshair Cursor (Crisp classic '+' shape, clearly visible on white canvas) */
+.sketch-canvas-wrap .excalidraw canvas.interactive[style*="crosshair"],
+.sketch-canvas-wrap .excalidraw canvas[style*="crosshair"],
+.sketch-canvas-wrap canvas.interactive[style*="crosshair"],
+.sketch-canvas-wrap[data-active-tool="freedraw"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]),
+.sketch-canvas-wrap[data-active-tool="rectangle"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]),
+.sketch-canvas-wrap[data-active-tool="diamond"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]),
+.sketch-canvas-wrap[data-active-tool="ellipse"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]),
+.sketch-canvas-wrap[data-active-tool="arrow"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]),
+.sketch-canvas-wrap[data-active-tool="line"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]),
+.sketch-canvas-wrap[data-active-tool="text"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]),
+.sketch-canvas-wrap[data-active-tool="image"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]),
+.sketch-canvas-wrap[data-active-tool="frame"] canvas.interactive:not([style*="resize"]):not([style*="move"]):not([style*="grab"]):not([style*="grabbing"]) {
+  cursor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMSIgaGVpZ2h0PSIyMSIgdmlld0JveD0iMCAwIDIxIDIxIj48bGluZSB4MT0iMTAuNSIgeTE9IjEiIHgyPSIxMC41IiB5Mj0iMjAiIHN0cm9rZT0iI2ZmZmZmZiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0ic3F1YXJlIi8+PGxpbmUgeDE9IjEiIHkxPSIxMC41IiB4Mj0iMjAiIHkyPSIxMC41IiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InNxdWFyZSIvPjxsaW5lIHgxPSIxMC41IiB5MT0iMSIgeDI9IjEwLjUiIHkyPSIyMCIgc3Ryb2tlPSIjMDAwMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InNxdWFyZSIvPjxsaW5lIHgxPSIxIiB5MT0iMTAuNSIgeDI9IjIwIiB5Mj0iMTAuNSIgc3Ryb2tlPSIjMDAwMDAwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InNxdWFyZSIvPjwvc3ZnPg==") 10 10, crosshair !important;
+}
+
+/* Classic Circular Eraser Cursor (Crisp dark circle, clearly visible on white canvas) */
+.sketch-canvas-wrap [data-active-tool="eraser"] canvas.interactive,
+.sketch-canvas-wrap .excalidraw canvas.interactive[style*="url("] {
+  cursor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCIgdmlld0JveD0iMCAwIDIwIDIwIj48Y2lyY2xlIGN4PSIxMCIgY3k9IjEwIiByPSI1LjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZmZmZiIgc3Ryb2tlLXdpZHRoPSIzIi8+PGNpcmNsZSBjeD0iMTAiIGN5PSIxMCIgcj0iNS41IiBmaWxsPSJyZ2JhKDE1LCAyMywgNDIsIDAuMTUpIiBzdHJva2U9IiMwMDAwMDAiIHN0cm9rZS13aWR0aD0iMS41Ii8+PC9zdmc+") 10 10, auto !important;
+}
+
+/* Hide Excalidraw library panel & clutter to keep it focused and clean */
+.sketch-canvas-wrap .default-sidebar-trigger,
+.sketch-canvas-wrap .sidebar-trigger[data-testid="default-sidebar-trigger"],
+.sketch-canvas-wrap [data-testid="default-sidebar-trigger"],
+.sketch-canvas-wrap .sidebar-tab-trigger[id$="-trigger-library"],
+.sketch-canvas-wrap [id$="-content-library"],
+.sketch-canvas-wrap .layer-ui__library {
+  display: none !important;
+}
+
+/* Keep top menu accessible and responsive */
+.sketch-save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--bg-surface, #ffffff);
+  color: var(--text-secondary, #64748b);
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  Floating Toolbar Document Tray (Seamless Native Styling)
+ * ═══════════════════════════════════════════════════════ */
+
+/* Document Tray placed directly inside Excalidraw's floating toolbar on the icon's right side */
+.sketch-toolbar-docs-tray {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 0 0 2px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  max-width: 420px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  animation: fadeInTray 0.18s ease-out;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.sketch-toolbar-docs-tray::-webkit-scrollbar {
+  display: none;
+}
+
+/* Individual document preview chip inside toolbar (standard button size, even and common) */
+.sketch-tray-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  position: relative;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.sketch-tray-item:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* Active / Ticked State - clean selection styling without jarring glow */
+.sketch-tray-item.is-active {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: #10b981;
+}
+
+.sketch-tray-thumb-wrap {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.sketch-tray-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Crisp green checkmark badge at top-right corner */
+.sketch-tray-tick-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #10b981;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  z-index: 4;
+  animation: badgeScaleIn 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.sketch-tray-remove-btn {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #ffffff;
+  background: #ef4444;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: all 0.15s ease;
+  z-index: 5;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.sketch-tray-item:hover .sketch-tray-remove-btn {
+  opacity: 1;
+}
+
+.sketch-tray-remove-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
+@keyframes fadeInTray {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes badgeScaleIn {
+  from {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+

@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ArrowLeft, Printer, Crop, Sparkles,
   RotateCcw, RotateCw, Sliders, Check, ShieldAlert, X,
   AlertCircle, Upload, XCircle, ChevronLeft, ChevronRight,
-  Trash2, Plus, FilePlus, Layout, ZoomIn, ZoomOut
+  Trash2, Plus, FilePlus, Layout, ZoomIn, ZoomOut, Maximize2, Loader2
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAppStore } from '../store/appStore';
@@ -28,6 +28,7 @@ import {
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { detectDocumentCorners, expandCropWithMargin } from '../utils/documentDetector';
 
 // Edit Tab types
 enum EditTab {
@@ -403,7 +404,7 @@ function PreviewScreen() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [isOrganizing, setIsOrganizing] = useState(false);
-  const [activeTab, setActiveTab] = useState<EditTab>(EditTab.FILTERS);
+  const [activeTab, setActiveTab] = useState<EditTab>(EditTab.CROP);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [previewImagePath, setPreviewImagePath] = useState<string | null>(null);
@@ -422,24 +423,86 @@ function PreviewScreen() {
   // Canvas Refs for editing
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const originalImageRef = useRef<HTMLImageElement | null>(null);
   const editedImageRef = useRef<HTMLCanvasElement | HTMLImageElement | null>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const [activeFilter, setActiveFilter] = useState<'grayscale' | 'binarize' | 'clean' | null>(null);
+  const [canvasDimensions, setCanvasDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [displayDimensions, setDisplayDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [activeHandle, setActiveHandle] = useState<keyof QuadCrop | null>('tl');
 
-  // 4 Corner Perspective Crop State
+  // 4 Corner Perspective Crop State (Defaults to entire image 0-100%)
   const [cropBox, setCropBox] = useState<QuadCrop>({
-    tl: { x: 10, y: 10 },
-    tr: { x: 90, y: 10 },
-    bl: { x: 10, y: 90 },
-    br: { x: 90, y: 90 }
+    tl: { x: 0, y: 0 },
+    tr: { x: 100, y: 0 },
+    bl: { x: 0, y: 100 },
+    br: { x: 100, y: 100 }
   });
 
+  // Subject detector margin state & raw detected box ref
+  const [cropMargin, setCropMargin] = useState<number>(1.5);
+  const rawDetectedBoxRef = useRef<QuadCrop | null>(null);
+
+  // Auto-crop detector loading spinner state
+  const [isAutoDetecting, setIsAutoDetecting] = useState(false);
+
+  // Checks whether the crop box has been adjusted away from the default full-image rectangle
+  const isCropPending = useCallback((): boolean => {
+    const isDefault =
+      Math.abs(cropBox.tl.x - 0) < 0.8 &&
+      Math.abs(cropBox.tl.y - 0) < 0.8 &&
+      Math.abs(cropBox.tr.x - 100) < 0.8 &&
+      Math.abs(cropBox.tr.y - 0) < 0.8 &&
+      Math.abs(cropBox.bl.x - 0) < 0.8 &&
+      Math.abs(cropBox.bl.y - 100) < 0.8 &&
+      Math.abs(cropBox.br.x - 100) < 0.8 &&
+      Math.abs(cropBox.br.y - 100) < 0.8;
+    return !isDefault;
+  }, [cropBox]);
+
+  // Compute and lock display dimensions to match image aspect ratio inside the workspace
+  const updateDisplayDimensions = useCallback(() => {
+    const ws = workspaceRef.current;
+    const img = editedImageRef.current || originalImageRef.current;
+    if (!ws || !img) return;
+    const imgW = (img instanceof HTMLImageElement ? img.naturalWidth || img.width : img.width) || 0;
+    const imgH = (img instanceof HTMLImageElement ? img.naturalHeight || img.height : img.height) || 0;
+    if (imgW === 0 || imgH === 0) return;
+
+    const wsRect = ws.getBoundingClientRect();
+    if (wsRect.width === 0 || wsRect.height === 0) return;
+
+    const pad = 24; // safety padding so canvas never overflows workspace
+    const availW = Math.max(50, wsRect.width - pad);
+    const availH = Math.max(50, wsRect.height - pad);
+    const scale = Math.min(availW / imgW, availH / imgH);
+    const displayW = Math.max(1, Math.round(imgW * scale));
+    const displayH = Math.max(1, Math.round(imgH * scale));
+    setDisplayDimensions({ width: displayW, height: displayH });
+  }, []);
+
+  // Sync display dimensions on window/workspace resize
+  useEffect(() => {
+    if (!isEditing || !workspaceRef.current) return;
+    const observer = new ResizeObserver(() => {
+      updateDisplayDimensions();
+    });
+    observer.observe(workspaceRef.current);
+    updateDisplayDimensions();
+    return () => observer.disconnect();
+  }, [isEditing, updateDisplayDimensions]);
+
   // Custom Crop Dimensions State
+  const [customCropEnabled, setCustomCropEnabled] = useState(false);
   const [customCropWidth, setCustomCropWidth] = useState<string>('');
   const [customCropHeight, setCustomCropHeight] = useState<string>('');
   const [customCropUnit, setCustomCropUnit] = useState<'px' | 'mm' | 'cm' | 'in'>('px');
+
+  // Interactive draw crop state
+  const [drawCropStart, setDrawCropStart] = useState<Point | null>(null);
+  const prevCropBeforeDrawRef = useRef<QuadCrop>(cropBox);
 
   const applyCustomCropDimensions = (
     widthStr?: string,
@@ -477,8 +540,8 @@ function PreviewScreen() {
     let pctW = (targetWpx / imgWidth) * 100;
     let pctH = (targetHpx / imgHeight) * 100;
 
-    if (pctW > 90 || pctH > 90) {
-      const scaleFactor = Math.min(85 / pctW, 85 / pctH);
+    if (pctW > 100 || pctH > 100) {
+      const scaleFactor = Math.min(100 / pctW, 100 / pctH);
       pctW *= scaleFactor;
       pctH *= scaleFactor;
     }
@@ -682,11 +745,14 @@ function PreviewScreen() {
 
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
-  // Spacebar pan mode detection
+  // Spacebar pan mode detection & Escape key to discard
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
         setIsSpacePressed(true);
+      }
+      if (e.key === 'Escape' && isEditing && !isSignatureModalOpen) {
+        handleDiscardEdit();
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -700,7 +766,7 @@ function PreviewScreen() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [isEditing, isSignatureModalOpen]);
 
   // Reset zoom & pan on exiting editing
   useEffect(() => {
@@ -989,7 +1055,15 @@ function PreviewScreen() {
       originalImageRef.current = img;
       editedImageRef.current = img;
       setActiveFilter(null);
+      setCanvasDimensions({ width: img.width, height: img.height });
       resetCanvas();
+      setTimeout(() => {
+        updateDisplayDimensions();
+        // If in Crop tab, run auto-detection to snap to subject with margin
+        if (activeTab === EditTab.CROP) {
+          handleAutoCrop(cropMargin, true);
+        }
+      }, 60);
     };
     img.onerror = () => {
       toast.error('Failed to load editor image');
@@ -1013,16 +1087,18 @@ function PreviewScreen() {
 
     canvas.width = img.width;
     canvas.height = img.height;
+    setCanvasDimensions({ width: img.width, height: img.height });
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.drawImage(img, 0, 0);
     }
     setCropBox({
-      tl: { x: 10, y: 10 },
-      tr: { x: 90, y: 10 },
-      bl: { x: 10, y: 90 },
-      br: { x: 90, y: 90 }
+      tl: { x: 0, y: 0 },
+      tr: { x: 100, y: 0 },
+      bl: { x: 0, y: 100 },
+      br: { x: 100, y: 100 }
     });
+    setActiveHandle('tl');
     setPlacedSignatures((doc?.signatures || []).filter((sig) => (sig.page || 1) === pageNumber));
   };
 
@@ -1079,6 +1155,7 @@ function PreviewScreen() {
 
     canvas.width = img.width;
     canvas.height = img.height;
+    setCanvasDimensions({ width: img.width, height: img.height });
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -1098,10 +1175,10 @@ function PreviewScreen() {
   };
 
   // Run perspective warp cropping
-  const executeCrop = () => {
+  const executeCrop = (showToast = true): boolean => {
     const canvas = canvasRef.current;
     const img = editedImageRef.current || originalImageRef.current;
-    if (!canvas || !img) return;
+    if (!canvas || !img) return false;
 
     // Map percentage handles back to actual source image pixel coordinates based on img width/height
     const srcPoints: Point[] = [
@@ -1120,6 +1197,11 @@ function PreviewScreen() {
     const h2 = Math.hypot(srcPoints[3].x - srcPoints[1].x, srcPoints[3].y - srcPoints[1].y);
     const dstHeight = Math.round(Math.max(h1, h2));
 
+    if (dstWidth < 10 || dstHeight < 10) {
+      toast.error('Crop area is too small.');
+      return false;
+    }
+
     // Target rectangular output coordinates
     const dstPoints: Point[] = [
       { x: 0, y: 0 },
@@ -1133,7 +1215,7 @@ function PreviewScreen() {
     tempCanvas.width = img.width;
     tempCanvas.height = img.height;
     const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
+    if (!tempCtx) return false;
     tempCtx.drawImage(img, 0, 0);
 
     // Create cropped canvas for destination
@@ -1145,7 +1227,7 @@ function PreviewScreen() {
     const matrix = getHomography(srcPoints, dstPoints);
     if (matrix.length === 0) {
       toast.error('Failed to compute perspective matrix. Verify shape.');
-      return;
+      return false;
     }
 
     // Resize canvas and project pixels projectively
@@ -1153,19 +1235,26 @@ function PreviewScreen() {
 
     // Save the cropped version
     editedImageRef.current = croppedCanvas;
+    setCanvasDimensions({ width: dstWidth, height: dstHeight });
 
-    // Reset selection handles
+    // Reset selection handles to full image
     setCropBox({
-      tl: { x: 5, y: 5 },
-      tr: { x: 95, y: 5 },
-      bl: { x: 5, y: 95 },
-      br: { x: 95, y: 95 }
+      tl: { x: 0, y: 0 },
+      tr: { x: 100, y: 0 },
+      bl: { x: 0, y: 100 },
+      br: { x: 100, y: 100 }
     });
+    rawDetectedBoxRef.current = null;
+    setActiveHandle('tl');
 
     // Redraw canvas and apply active filter if present
     redrawCanvas();
+    updateDisplayDimensions();
 
-    toast.success('Perspective crop applied');
+    if (showToast) {
+      toast.success('Perspective crop applied');
+    }
+    return true;
   };
 
   const handleRotate = async (clockwise: boolean) => {
@@ -1185,6 +1274,7 @@ function PreviewScreen() {
 
     // Save rotated image
     editedImageRef.current = rotatedCanvas;
+    setCanvasDimensions({ width: rotatedCanvas.width, height: rotatedCanvas.height });
 
     // Rotate placed signatures for this page
     const rotatedSigs = await Promise.all(
@@ -1204,16 +1294,33 @@ function PreviewScreen() {
     );
     setPlacedSignatures(rotatedSigs);
 
+    // Rotate placed texts for this page
+    const rotatedTexts = placedTexts.map((txt) => {
+      const newX = clockwise ? 100 - txt.y - txt.height : txt.y;
+      const newY = clockwise ? txt.x : 100 - txt.x - txt.width;
+      return {
+        ...txt,
+        x: newX,
+        y: newY,
+        width: txt.height,
+        height: txt.width
+      };
+    });
+    setPlacedTexts(rotatedTexts);
+
     // Reset crop handles to fit the new aspect ratio / rotated image
     setCropBox({
-      tl: { x: 10, y: 10 },
-      tr: { x: 90, y: 10 },
-      bl: { x: 10, y: 90 },
-      br: { x: 90, y: 90 }
+      tl: { x: 0, y: 0 },
+      tr: { x: 100, y: 0 },
+      bl: { x: 0, y: 100 },
+      br: { x: 100, y: 100 }
     });
+    rawDetectedBoxRef.current = null;
+    setActiveHandle('tl');
 
     // Redraw canvas
     redrawCanvas();
+    updateDisplayDimensions();
 
     toast.success(`Rotated 90° ${clockwise ? 'clockwise' : 'counter-clockwise'}`);
   };
@@ -1229,63 +1336,169 @@ function PreviewScreen() {
     if (!img) return;
 
     editedImageRef.current = img;
+    setCanvasDimensions({ width: img.width, height: img.height });
     setCropBox({
-      tl: { x: 10, y: 10 },
-      tr: { x: 90, y: 10 },
-      bl: { x: 10, y: 90 },
-      br: { x: 90, y: 90 }
+      tl: { x: 0, y: 0 },
+      tr: { x: 100, y: 0 },
+      bl: { x: 0, y: 100 },
+      br: { x: 100, y: 100 }
     });
+    rawDetectedBoxRef.current = null;
+    setActiveHandle('tl');
 
     setPlacedSignatures((doc?.signatures || []).filter((sig) => (sig.page || 1) === pageNumber));
-    redrawCanvas();
-    toast.success('Crop and rotation reset');
+    setPlacedTexts([]);
+    setActiveFilter(null);
+    redrawCanvas(null);
+    updateDisplayDimensions();
+    toast.success('Crop and rotation reset to original');
   };
 
-  // Draw real-time magnifying loupe zoom
-  const drawLoupe = (pctX: number, pctY: number) => {
+  // Clean cancellation that resets all pending annotations, filters, and canvas edits
+  const handleDiscardEdit = useCallback(() => {
+    setIsEditing(false);
+    setPlacedSignatures((doc?.signatures || []).filter((sig) => (sig.page || 1) === pageNumber));
+    setPlacedTexts([]);
+    setSelectedTextId(null);
+    setActiveFilter(null);
+    if (originalImageRef.current) {
+      editedImageRef.current = originalImageRef.current;
+      redrawCanvas(null);
+    }
+    toast.error('Changes discarded');
+  }, [doc, pageNumber]);
+
+  // Draw real-time magnifying loupe zoom with safe boundary clamping
+  const drawLoupe = useCallback((pctX: number, pctY: number) => {
     const loupeCanvas = loupeCanvasRef.current;
     const canvas = canvasRef.current;
-    if (!loupeCanvas || !canvas) return;
+    if (!loupeCanvas || !canvas || canvas.width === 0 || canvas.height === 0) return;
 
     const ctx = loupeCanvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear loupe (now 140x140)
-    ctx.clearRect(0, 0, 140, 140);
+    const destSize = 130;
+    if (loupeCanvas.width !== destSize || loupeCanvas.height !== destSize) {
+      loupeCanvas.width = destSize;
+      loupeCanvas.height = destSize;
+    }
+
+    // Clear loupe canvas with clean dark neutral background
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, destSize, destSize);
 
     // Map handle percentages to canvas coordinates
     const px = (pctX / 100) * canvas.width;
     const py = (pctY / 100) * canvas.height;
 
-    // Magnified zoom parameters: crop a 46x46 square around handle and stretch to 140x140 loupe (~3x zoom)
-    const srcSize = 46;
-    const destSize = 140;
+    // Magnified zoom parameters: crop a square around handle and stretch to 130x130 loupe
+    const srcSize = Math.max(20, Math.min(Math.min(canvas.width, canvas.height), 92));
+    const halfSrc = srcSize / 2;
 
-    // Draw the zoomed image onto the loupe canvas
-    ctx.drawImage(
-      canvas,
-      px - srcSize / 2,
-      py - srcSize / 2,
-      srcSize,
-      srcSize,
-      0,
-      0,
-      destSize,
-      destSize
-    );
+    // Safe bounds clamping to avoid drawImage out-of-bounds error on extreme edges
+    const sx = Math.max(0, Math.min(canvas.width - 1, px - halfSrc));
+    const sy = Math.max(0, Math.min(canvas.height - 1, py - halfSrc));
+    const sw = Math.max(1, Math.min(canvas.width - sx, (px + halfSrc) - sx));
+    const sh = Math.max(1, Math.min(canvas.height - sy, (py + halfSrc) - sy));
 
-    // Draw 90-degree crossing target lines (crosshairs) crossing the center (70, 70)
+    const dx = Math.round(((sx - (px - halfSrc)) / srcSize) * destSize);
+    const dy = Math.round(((sy - (py - halfSrc)) / srcSize) * destSize);
+    const dw = Math.round((sw / srcSize) * destSize);
+    const dh = Math.round((sh / srcSize) * destSize);
+
+    try {
+      ctx.drawImage(canvas, sx, sy, sw, sh, dx, dy, dw, dh);
+    } catch {
+      // Fallback if coordinates are out of bounds
+    }
+
+    // Draw 90-degree crossing target lines (crosshairs) crossing the exact center
+    const center = destSize / 2;
     ctx.strokeStyle = '#EF4444'; // Solid Red crosshair lines
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     // Vertical line
-    ctx.moveTo(70, 0);
-    ctx.lineTo(70, 140);
+    ctx.moveTo(center, 0);
+    ctx.lineTo(center, destSize);
     // Horizontal line
-    ctx.moveTo(0, 70);
-    ctx.lineTo(140, 70);
+    ctx.moveTo(0, center);
+    ctx.lineTo(destSize, center);
     ctx.stroke();
-  };
+
+    // Center precision circle
+    ctx.beginPath();
+    ctx.arc(center, center, 4, 0, 2 * Math.PI);
+    ctx.stroke();
+  }, []);
+
+  // Automatically keep Loupe updated when switching to crop tab or when handles change
+  useEffect(() => {
+    if (activeTab === EditTab.CROP && activeHandle && ['tl', 'tr', 'bl', 'br'].includes(activeHandle)) {
+      const handle = activeHandle as keyof QuadCrop;
+      const timer = setTimeout(() => {
+        drawLoupe(cropBox[handle].x, cropBox[handle].y);
+      }, 30);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, activeHandle, cropBox, canvasDimensions, drawLoupe]);
+
+  // Automatic document & ID boundary detection with margin and visual loading state
+  const handleAutoCrop = useCallback((margin: number = cropMargin, isInitialAuto: boolean = false) => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      if (!isInitialAuto) toast.error('No image canvas available to detect');
+      return;
+    }
+    if (!isInitialAuto) setIsAutoDetecting(true);
+    // Yield execution to the browser thread so the loading spinner renders immediately
+    setTimeout(() => {
+      try {
+        const result = detectDocumentCorners(canvas, margin);
+        if (result.hasDetectedSubject) {
+          rawDetectedBoxRef.current = result.rawBox;
+          setCropBox(result.cropBox);
+          setActiveHandle('tl');
+          setTimeout(() => {
+            drawLoupe(result.cropBox.tl.x, result.cropBox.tl.y);
+          }, 20);
+          if (isInitialAuto) {
+            toast.success(`Subject automatically detected with ${margin}% margin`, { icon: '✨' });
+          } else {
+            toast.success(`Subject detected with ${margin}% margin`, { icon: '✨' });
+          }
+        } else {
+          rawDetectedBoxRef.current = null;
+          if (!isInitialAuto) {
+            setCropBox({
+              tl: { x: 0, y: 0 },
+              tr: { x: 100, y: 0 },
+              bl: { x: 0, y: 100 },
+              br: { x: 100, y: 100 }
+            });
+            toast('No distinct subject found; framed to full image', { icon: 'ℹ️' });
+          }
+        }
+      } catch (err) {
+        console.error('Auto crop error:', err);
+        if (!isInitialAuto) toast.error('Failed to auto-detect document');
+      } finally {
+        if (!isInitialAuto) setIsAutoDetecting(false);
+      }
+    }, 50);
+  }, [cropMargin, drawLoupe]);
+
+  // Adjust margin dynamically on detected subject
+  const applySubjectWithMargin = useCallback((newMargin: number) => {
+    const raw = rawDetectedBoxRef.current;
+    if (!raw) {
+      handleAutoCrop(newMargin, false);
+      return;
+    }
+    const expanded = expandCropWithMargin(raw, newMargin);
+    setCropBox(expanded);
+    drawLoupe(expanded.tl.x, expanded.tl.y);
+    toast.success(`Subject margin updated to ${newMargin}%`);
+  }, [handleAutoCrop, drawLoupe]);
 
   // Signature Pad Handlers
   const startSigDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1520,9 +1733,17 @@ function PreviewScreen() {
   };
 
   // Save changes to backend (flattened with signatures, and clean copy preserved)
-  const handleSaveEdit = async () => {
+  const handleSaveEdit = async (): Promise<boolean> => {
     const canvas = canvasRef.current;
-    if (!canvas || !doc) return;
+    if (!canvas || !doc) return false;
+
+    // Auto-commit any active/pending crop box so user's adjustments are never lost
+    if (isCropPending()) {
+      const croppedOk = executeCrop(false);
+      if (!croppedOk) {
+        return false;
+      }
+    }
 
     setIsProcessing(true);
     try {
@@ -1599,12 +1820,12 @@ function PreviewScreen() {
         // Wrap text if needed
         const words = txt.text.split(' ');
         let line = '';
-        let lines = [];
+        const lines = [];
         
         for (let n = 0; n < words.length; n++) {
-          let testLine = line + words[n] + ' ';
-          let metrics = flatCtx.measureText(testLine);
-          let testWidth = metrics.width;
+          const testLine = line + words[n] + ' ';
+          const metrics = flatCtx.measureText(testLine);
+          const testWidth = metrics.width;
           if (testWidth > destW && n > 0) {
             lines.push(line);
             line = words[n] + ' ';
@@ -1652,6 +1873,7 @@ function PreviewScreen() {
         setIsEditing(false);
         setPlacedTexts([]);
         setSelectedTextId(null);
+        setActiveFilter(null);
         const newTimestamp = Date.now();
         setTimestamp(newTimestamp);
         if (doc.type === 'PDF') {
@@ -1662,12 +1884,15 @@ function PreviewScreen() {
         } else {
           setPreviewImagePath(result.data.tempPath);
         }
+        return true;
       } else {
         toast.error(result.error.message);
+        return false;
       }
     } catch (error) {
       console.error(error);
       toast.error('Failed to save document edits');
+      return false;
     } finally {
       setIsProcessing(false);
     }
@@ -1699,10 +1924,20 @@ function PreviewScreen() {
 
     if (['tl', 'tr', 'bl', 'br'].includes(actualType)) {
       const handle = actualType as keyof QuadCrop;
+      setActiveHandle(handle);
       // Draw zoomed magnifier loupe immediately on mousedown
       setTimeout(() => {
         drawLoupe(cropBox[handle].x, cropBox[handle].y);
       }, 0);
+    } else if (actualType === 'cropDraw') {
+      if (!containerRef.current) return;
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const startX = Math.max(0, Math.min(100, ((e.clientX - containerRect.left) / containerRect.width) * 100));
+      const startY = Math.max(0, Math.min(100, ((e.clientY - containerRect.top) / containerRect.height) * 100));
+      prevCropBeforeDrawRef.current = cropBox;
+      setDrawCropStart({ x: startX, y: startY });
+      setActiveHandle(null);
+      drawLoupe(startX, startY);
     }
   };
 
@@ -1789,6 +2024,7 @@ function PreviewScreen() {
       const newX = Math.max(0, Math.min(100, ((e.clientX - containerRect.left) / containerRect.width) * 100));
       const newY = Math.max(0, Math.min(100, ((e.clientY - containerRect.top) / containerRect.height) * 100));
 
+      setActiveHandle(dragType as keyof QuadCrop);
       setCropBox((prev) => {
         const updated = {
           ...prev,
@@ -1798,6 +2034,21 @@ function PreviewScreen() {
         drawLoupe(newX, newY);
         return updated;
       });
+    } else if (dragType === 'cropDraw' && drawCropStart) {
+      const currentX = Math.max(0, Math.min(100, ((e.clientX - containerRect.left) / containerRect.width) * 100));
+      const currentY = Math.max(0, Math.min(100, ((e.clientY - containerRect.top) / containerRect.height) * 100));
+      const minX = Math.min(drawCropStart.x, currentX);
+      const maxX = Math.max(drawCropStart.x, currentX);
+      const minY = Math.min(drawCropStart.y, currentY);
+      const maxY = Math.max(drawCropStart.y, currentY);
+
+      setCropBox({
+        tl: { x: minX, y: minY },
+        tr: { x: maxX, y: minY },
+        bl: { x: minX, y: maxY },
+        br: { x: maxX, y: maxY }
+      });
+      drawLoupe(currentX, currentY);
     } else if (dragType === 'cropMove') {
       setCropBox((prev) => {
         const minX = Math.min(prev.tl.x, prev.tr.x, prev.bl.x, prev.br.x);
@@ -1843,14 +2094,26 @@ function PreviewScreen() {
   };
 
   const handleMouseUp = () => {
+    if (dragType === 'cropDraw') {
+      setCropBox((prev) => {
+        const w = Math.abs(prev.tr.x - prev.tl.x);
+        const h = Math.abs(prev.bl.y - prev.tl.y);
+        // If the drawn rectangle is tiny (accidental click), restore previous
+        if (w < 2 || h < 2) {
+          return prevCropBeforeDrawRef.current;
+        }
+        return prev;
+      });
+      setDrawCropStart(null);
+      setActiveHandle('br');
+    }
     setDragStart(null);
     setDragType(null);
   };
 
   const handleBack = () => {
     if (isEditing) {
-      setIsEditing(false);
-      setPlacedSignatures((doc?.signatures || []).filter((sig) => (sig.page || 1) === pageNumber));
+      handleDiscardEdit();
     } else {
       setView(previewBackView || AppView.DOCUMENT_LIST);
     }
@@ -1875,7 +2138,8 @@ function PreviewScreen() {
 
   const handleContinue = async () => {
     if (isEditing) {
-      await handleSaveEdit();
+      const saved = await handleSaveEdit();
+      if (!saved) return;
     }
     setView(AppView.OUTPUT_OPTIONS);
   };
@@ -2456,7 +2720,10 @@ function PreviewScreen() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => setIsEditing(true)}
+                  onClick={() => {
+                    setActiveTab(EditTab.CROP);
+                    setIsEditing(true);
+                  }}
                   disabled={isProcessing || isPrinting}
                 >
                   <Crop size={16} className="mr-1.5" />
@@ -2558,6 +2825,7 @@ function PreviewScreen() {
             ) : (
               // Active Editor Workspace
               <div
+                ref={workspaceRef}
                 className={`relative w-full h-full flex items-center justify-center border border-border bg-bg-sunken p-1 rounded-lg overflow-hidden ${(zoomScale > 1.0 || isSpacePressed) ? (dragType === 'canvasPan' ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
                 onMouseDown={(e) => {
                   if (isSpacePressed || e.button === 1 || zoomScale > 1.0) {
@@ -2617,15 +2885,30 @@ function PreviewScreen() {
 
                 <div
                   ref={containerRef}
-                  className="relative select-none transition-transform duration-75 flex items-center justify-center max-w-full max-h-full"
+                  className="relative select-none transition-transform duration-75 flex items-center justify-center shrink-0"
                   style={{
+                    width: displayDimensions ? `${displayDimensions.width}px` : undefined,
+                    height: displayDimensions ? `${displayDimensions.height}px` : undefined,
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    aspectRatio: displayDimensions
+                      ? undefined
+                      : (canvasDimensions.width || canvasRef.current?.width || 0) > 0 &&
+                        (canvasDimensions.height || canvasRef.current?.height || 0) > 0
+                        ? `${canvasDimensions.width || canvasRef.current?.width} / ${canvasDimensions.height || canvasRef.current?.height}`
+                        : undefined,
                     transform: `translate(${panPosition.x}px, ${panPosition.y}px) scale(${zoomScale})`,
                     transformOrigin: 'center center'
                   }}
                 >
                   <canvas
                     ref={canvasRef}
-                    className={`max-w-full max-h-full object-contain rounded shadow-md bg-white block ${(zoomScale > 1.0 || isSpacePressed) ? (dragType === 'canvasPan' ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+                    className={`block rounded shadow-md bg-white ${(zoomScale > 1.0 || isSpacePressed) ? (dragType === 'canvasPan' ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'block'
+                    }}
                     onMouseDown={(e) => {
                       if (isSpacePressed || e.button === 1 || zoomScale > 1.0) {
                         handleMouseDown(e, 'canvasPan');
@@ -2636,18 +2919,28 @@ function PreviewScreen() {
                   {/* Perspective Crop Handles */}
                   {activeTab === EditTab.CROP && (
                     <div className="absolute inset-0 w-full h-full">
-                      {/* SVG Connector lines (Using viewBox for perfect pixel percentage scaling) */}
+                      {/* SVG Connector lines and free-form crop draw overlay */}
                       <svg
                         className="absolute inset-0 w-full h-full z-10"
                         viewBox="0 0 100 100"
                         preserveAspectRatio="none"
-                        style={{ pointerEvents: 'none' }}
+                        style={{ pointerEvents: 'auto', cursor: isSpacePressed ? 'grab' : 'crosshair' }}
+                        onMouseDown={(e) => {
+                          if (isSpacePressed || e.button === 1 || zoomScale > 1.0) {
+                            handleMouseDown(e, 'canvasPan');
+                          } else {
+                            handleMouseDown(e, 'cropDraw');
+                          }
+                        }}
                       >
                         <polygon
                           points={`${cropBox.tl.x},${cropBox.tl.y} ${cropBox.tr.x},${cropBox.tr.y} ${cropBox.br.x},${cropBox.br.y} ${cropBox.bl.x},${cropBox.bl.y}`}
                           className={`stroke-accent stroke-[0.4] fill-accent/15 hover:fill-accent/30 transition-colors duration-normal ${dragType === 'cropMove' ? 'cursor-grabbing' : 'cursor-grab'}`}
                           style={{ pointerEvents: 'auto' }}
-                          onMouseDown={(e) => handleMouseDown(e, 'cropMove')}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            handleMouseDown(e, 'cropMove');
+                          }}
                         />
                         {/* Top Edge (tl to tr) - Vertical Movement */}
                         <line
@@ -2658,7 +2951,10 @@ function PreviewScreen() {
                           className="stroke-accent/0 hover:stroke-accent/40 cursor-ns-resize transition-colors duration-normal"
                           strokeWidth="3"
                           style={{ pointerEvents: 'auto' }}
-                          onMouseDown={(e) => handleMouseDown(e, 'edge-top')}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            handleMouseDown(e, 'edge-top');
+                          }}
                         />
                         {/* Right Edge (tr to br) - Horizontal Movement */}
                         <line
@@ -2669,7 +2965,10 @@ function PreviewScreen() {
                           className="stroke-accent/0 hover:stroke-accent/40 cursor-ew-resize transition-colors duration-normal"
                           strokeWidth="3"
                           style={{ pointerEvents: 'auto' }}
-                          onMouseDown={(e) => handleMouseDown(e, 'edge-right')}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            handleMouseDown(e, 'edge-right');
+                          }}
                         />
                         {/* Bottom Edge (bl to br) - Vertical Movement */}
                         <line
@@ -2680,7 +2979,10 @@ function PreviewScreen() {
                           className="stroke-accent/0 hover:stroke-accent/40 cursor-ns-resize transition-colors duration-normal"
                           strokeWidth="3"
                           style={{ pointerEvents: 'auto' }}
-                          onMouseDown={(e) => handleMouseDown(e, 'edge-bottom')}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            handleMouseDown(e, 'edge-bottom');
+                          }}
                         />
                         {/* Left Edge (tl to bl) - Horizontal Movement */}
                         <line
@@ -2691,7 +2993,10 @@ function PreviewScreen() {
                           className="stroke-accent/0 hover:stroke-accent/40 cursor-ew-resize transition-colors duration-normal"
                           strokeWidth="3"
                           style={{ pointerEvents: 'auto' }}
-                          onMouseDown={(e) => handleMouseDown(e, 'edge-left')}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            handleMouseDown(e, 'edge-left');
+                          }}
                         />
                       </svg>
 
@@ -2699,25 +3004,61 @@ function PreviewScreen() {
                       <div
                         className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                         style={{ left: `${cropBox.tl.x}%`, top: `${cropBox.tl.y}%` }}
-                        onMouseDown={(e) => handleMouseDown(e, 'tl')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, 'tl');
+                        }}
+                        onMouseEnter={() => {
+                          if (!dragType) {
+                            setActiveHandle('tl');
+                            drawLoupe(cropBox.tl.x, cropBox.tl.y);
+                          }
+                        }}
                         title="Top-Left Corner"
                       />
                       <div
                         className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                         style={{ left: `${cropBox.tr.x}%`, top: `${cropBox.tr.y}%` }}
-                        onMouseDown={(e) => handleMouseDown(e, 'tr')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, 'tr');
+                        }}
+                        onMouseEnter={() => {
+                          if (!dragType) {
+                            setActiveHandle('tr');
+                            drawLoupe(cropBox.tr.x, cropBox.tr.y);
+                          }
+                        }}
                         title="Top-Right Corner"
                       />
                       <div
                         className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                         style={{ left: `${cropBox.bl.x}%`, top: `${cropBox.bl.y}%` }}
-                        onMouseDown={(e) => handleMouseDown(e, 'bl')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, 'bl');
+                        }}
+                        onMouseEnter={() => {
+                          if (!dragType) {
+                            setActiveHandle('bl');
+                            drawLoupe(cropBox.bl.x, cropBox.bl.y);
+                          }
+                        }}
                         title="Bottom-Left Corner"
                       />
                       <div
                         className="absolute w-5 h-5 bg-accent border-2 border-white rounded-full cursor-pointer -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                         style={{ left: `${cropBox.br.x}%`, top: `${cropBox.br.y}%` }}
-                        onMouseDown={(e) => handleMouseDown(e, 'br')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, 'br');
+                        }}
+                        onMouseEnter={() => {
+                          if (!dragType) {
+                            setActiveHandle('br');
+                            drawLoupe(cropBox.br.x, cropBox.br.y);
+                          }
+                        }}
                         title="Bottom-Right Corner"
                       />
 
@@ -2725,25 +3066,37 @@ function PreviewScreen() {
                       <div
                         className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full cursor-ns-resize -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                         style={{ left: `${(cropBox.tl.x + cropBox.tr.x) / 2}%`, top: `${(cropBox.tl.y + cropBox.tr.y) / 2}%` }}
-                        onMouseDown={(e) => handleMouseDown(e, 'edge-top')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, 'edge-top');
+                        }}
                         title="Drag Top Edge (Vertical Only)"
                       />
                       <div
                         className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full cursor-ew-resize -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                         style={{ left: `${(cropBox.tr.x + cropBox.br.x) / 2}%`, top: `${(cropBox.tr.y + cropBox.br.y) / 2}%` }}
-                        onMouseDown={(e) => handleMouseDown(e, 'edge-right')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, 'edge-right');
+                        }}
                         title="Drag Right Edge (Horizontal Only)"
                       />
                       <div
                         className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full cursor-ns-resize -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                         style={{ left: `${(cropBox.bl.x + cropBox.br.x) / 2}%`, top: `${(cropBox.bl.y + cropBox.br.y) / 2}%` }}
-                        onMouseDown={(e) => handleMouseDown(e, 'edge-bottom')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, 'edge-bottom');
+                        }}
                         title="Drag Bottom Edge (Vertical Only)"
                       />
                       <div
                         className="absolute w-4 h-4 bg-white border-2 border-accent rounded-full cursor-ew-resize -translate-x-1/2 -translate-y-1/2 hover:scale-125 transition-transform z-20 shadow"
                         style={{ left: `${(cropBox.tl.x + cropBox.bl.x) / 2}%`, top: `${(cropBox.tl.y + cropBox.bl.y) / 2}%` }}
-                        onMouseDown={(e) => handleMouseDown(e, 'edge-left')}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, 'edge-left');
+                        }}
                         title="Drag Left Edge (Horizontal Only)"
                       />
                     </div>
@@ -2913,30 +3266,298 @@ function PreviewScreen() {
         {/* Right Side: Tool control panel (Only visible when editing) */}
         {isEditing && (
           <div className="w-80 border-l border-border bg-bg-surface px-4 py-3 flex flex-col gap-2.5 select-none z-10 animate-slide-in h-full overflow-hidden">
-            {/* Tabs Selector */}
+            {/* Header with Title and Close Button */}
+            <div className="flex items-center justify-between pb-1 flex-shrink-0">
+              <div className="flex items-center gap-1.5">
+                <Crop size={14} className="text-accent" />
+                <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider">
+                  {doc ? (doc.type === 'PDF' ? `Edit Page ${pageNumber}` : 'Edit Document') : 'Image Editor'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleDiscardEdit}
+                className="p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-sunken transition-colors"
+                title="Discard and Close"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Tabs Selector: Crop, Filters, Sign & Text */}
             <div className="flex border border-border bg-bg-sunken p-1 rounded-lg flex-shrink-0">
               <button
+                onClick={() => {
+                  setActiveTab(EditTab.CROP);
+                  updateDisplayDimensions();
+                }}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-fast ${activeTab === EditTab.CROP ? 'bg-bg-surface text-accent shadow-sm border border-border/50' : 'text-text-secondary hover:text-text-primary'}`}
+              >
+                Crop
+              </button>
+              <button
                 onClick={() => setActiveTab(EditTab.FILTERS)}
-                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-fast ${activeTab === EditTab.FILTERS ? 'bg-bg-surface text-accent shadow-sm border border-border/50' : 'text-text-secondary'}`}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-fast ${activeTab === EditTab.FILTERS ? 'bg-bg-surface text-accent shadow-sm border border-border/50' : 'text-text-secondary hover:text-text-primary'}`}
               >
                 Filters
               </button>
               <button
-                onClick={() => setActiveTab(EditTab.CROP)}
-                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-fast ${activeTab === EditTab.CROP ? 'bg-bg-surface text-accent shadow-sm border border-border/50' : 'text-text-secondary'}`}
-              >
-                Crop Box
-              </button>
-              <button
                 onClick={() => setActiveTab(EditTab.SIGNATURE)}
-                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-fast ${activeTab === EditTab.SIGNATURE ? 'bg-bg-surface text-accent shadow-sm border border-border/50' : 'text-text-secondary'}`}
+                className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-fast ${activeTab === EditTab.SIGNATURE ? 'bg-bg-surface text-accent shadow-sm border border-border/50' : 'text-text-secondary hover:text-text-primary'}`}
               >
-                Signature
+                Sign & Text
               </button>
             </div>
 
             {/* Tab Contents */}
             <div className="flex-1 overflow-y-auto pr-0.5 flex flex-col gap-3">
+              {activeTab === EditTab.CROP && (
+                <div className="flex flex-col gap-2.5 animate-fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Perspective Crop</span>
+                    {isCropPending() && (
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-accent/15 text-accent rounded-full border border-accent/30 animate-pulse">
+                        Pending Crop
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-text-secondary leading-snug">
+                    Drag the 4 corner handles to frame document edges, or click Auto crop.
+                  </p>
+
+                  {/* Quick Preset Buttons: Full Image & Auto Crop with Loader */}
+                  <div className="flex gap-1.5">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 justify-center py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary"
+                      onClick={() => {
+                        setCropBox({
+                          tl: { x: 0, y: 0 },
+                          tr: { x: 100, y: 0 },
+                          bl: { x: 0, y: 100 },
+                          br: { x: 100, y: 100 }
+                        });
+                        rawDetectedBoxRef.current = null;
+                        toast.success('Crop area set to entire image');
+                      }}
+                      title="Reset selection box to entire image (100%)"
+                    >
+                      <Maximize2 size={13} className="mr-1 text-text-muted" />
+                      Full (100%)
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={isAutoDetecting || isProcessing}
+                      className="flex-1 justify-center py-1.5 text-xs font-semibold text-accent hover:text-accent-hover relative overflow-hidden transition-all shadow-sm"
+                      onClick={() => handleAutoCrop(cropMargin, false)}
+                      title="Automatically detect ID, document, or subject boundaries with margin"
+                    >
+                      {isAutoDetecting ? (
+                        <>
+                          <Loader2 size={13} className="mr-1.5 animate-spin text-accent" />
+                          <span>Detecting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={13} className="mr-1.5 text-accent animate-pulse" />
+                          <span>Auto-Detect Subject</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  {/* Subject Safety Margin Selector */}
+                  <div className="flex items-center justify-between text-[11px] bg-bg-sunken border border-border/80 px-2.5 py-1.5 rounded-lg shadow-2xs">
+                    <span className="font-semibold text-text-muted text-[10px] uppercase tracking-wider">
+                      Subject Margin:
+                    </span>
+                    <div className="flex gap-1">
+                      {[
+                        { label: '0%', val: 0 },
+                        { label: '1.5%', val: 1.5 },
+                        { label: '3%', val: 3 },
+                        { label: '5%', val: 5 },
+                      ].map((m) => (
+                        <button
+                          key={m.label}
+                          type="button"
+                          onClick={() => {
+                            setCropMargin(m.val);
+                            applySubjectWithMargin(m.val);
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                            cropMargin === m.val
+                              ? 'bg-accent text-white shadow-xs'
+                              : 'bg-bg-surface hover:bg-accent/15 text-text-secondary hover:text-accent border border-border'
+                          }`}
+                          title={`Set subject crop box with ${m.val}% safety margin`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Aspect Ratio / Presets bar */}
+                  <div className="border border-border/80 rounded-lg p-2 bg-bg-sunken space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">Presets & Size</span>
+                      <button
+                        type="button"
+                        onClick={() => setCustomCropEnabled(!customCropEnabled)}
+                        className="text-[10px] text-accent hover:underline font-semibold"
+                      >
+                        {customCropEnabled ? 'Hide Custom' : 'Custom Size'}
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        { label: 'Passport', w: '3.5', h: '4.5', unit: 'cm' as const },
+                        { label: 'Stamp', w: '2', h: '2.5', unit: 'cm' as const },
+                        { label: 'A4', w: '210', h: '297', unit: 'mm' as const },
+                        { label: '4×6"', w: '4', h: '6', unit: 'in' as const },
+                        { label: '1:1', w: '500', h: '500', unit: 'px' as const },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => {
+                            setCustomCropWidth(preset.w);
+                            setCustomCropHeight(preset.h);
+                            setCustomCropUnit(preset.unit);
+                            applyCustomCropDimensions(preset.w, preset.h, preset.unit);
+                          }}
+                          className="px-2 py-0.5 text-[10px] bg-bg-surface hover:bg-accent/15 border border-border hover:border-accent/40 rounded text-text-secondary hover:text-accent transition-colors font-medium"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {customCropEnabled && (
+                      <div className="pt-2 border-t border-border/60 space-y-2 animate-fade-in">
+                        <div className="grid grid-cols-3 gap-1.5 items-center">
+                          <div>
+                            <label className="text-[9px] font-semibold text-text-secondary block mb-0.5">Width</label>
+                            <input
+                              type="number"
+                              placeholder="W"
+                              value={customCropWidth}
+                              onChange={(e) => setCustomCropWidth(e.target.value)}
+                              className="w-full px-2 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-semibold text-text-secondary block mb-0.5">Height</label>
+                            <input
+                              type="number"
+                              placeholder="H"
+                              value={customCropHeight}
+                              onChange={(e) => setCustomCropHeight(e.target.value)}
+                              className="w-full px-2 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-semibold text-text-secondary block mb-0.5">Unit</label>
+                            <select
+                              value={customCropUnit}
+                              onChange={(e) => setCustomCropUnit(e.target.value as any)}
+                              className="w-full px-1.5 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
+                            >
+                              <option value="px">px</option>
+                              <option value="mm">mm</option>
+                              <option value="cm">cm</option>
+                              <option value="in">in</option>
+                            </select>
+                          </div>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="w-full justify-center py-1 text-xs font-semibold"
+                          onClick={() => applyCustomCropDimensions()}
+                        >
+                          Apply Preset Size
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Compact Zoom Loupe Preview */}
+                  <div className="border border-border rounded-lg bg-bg-sunken p-2 flex flex-col items-center justify-center gap-1">
+                    <div className="flex justify-between w-full items-center">
+                      <span className="text-[9px] font-semibold text-text-muted uppercase">
+                        Corner Inspector {activeHandle && ['tl', 'tr', 'bl', 'br'].includes(activeHandle) ? `(${activeHandle.toUpperCase()})` : ''}
+                      </span>
+                      <span className="text-[9px] text-text-muted">
+                        {dragType ? 'Inspecting' : 'Hover / drag corner to inspect'}
+                      </span>
+                    </div>
+                    <div className="w-[130px] h-[130px] rounded border border-border bg-[#0f172a] overflow-hidden relative flex justify-center items-center shadow-inner">
+                      <canvas
+                        ref={loupeCanvasRef}
+                        width={130}
+                        height={130}
+                        className="w-full h-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Rotation Controls */}
+                  <div className="flex gap-1.5">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 justify-center py-1.5 text-xs text-text-secondary hover:text-text-primary"
+                      onClick={() => handleRotate(false)}
+                      title="Rotate counter-clockwise 90°"
+                    >
+                      <RotateCcw size={13} className="mr-1" />
+                      Rotate CCW
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 justify-center py-1.5 text-xs text-text-secondary hover:text-text-primary"
+                      onClick={() => handleRotate(true)}
+                      title="Rotate clockwise 90°"
+                    >
+                      <RotateCw size={13} className="mr-1" />
+                      Rotate CW
+                    </Button>
+                  </div>
+
+                  {/* Apply Crop & Revert */}
+                  <Button
+                    variant={isCropPending() ? "primary" : "secondary"}
+                    className={`w-full justify-center py-2 text-xs font-bold transition-all ${
+                      isCropPending()
+                        ? 'shadow-sm shadow-accent/20'
+                        : 'opacity-80'
+                    }`}
+                    onClick={() => executeCrop(true)}
+                    disabled={!isCropPending()}
+                    title={isCropPending() ? "Execute perspective warp crop now" : "Crop box is set to full image (no pending crop)"}
+                  >
+                    <Check size={15} className="mr-1.5" />
+                    {isCropPending() ? 'Apply Perspective Crop' : 'Crop Applied (100%)'}
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-center text-xs py-1 text-text-muted hover:text-text-secondary"
+                    onClick={handleResetCrop}
+                    title="Revert all crops and rotations back to original image"
+                  >
+                    <RotateCcw size={13} className="mr-1.5" />
+                    Revert to Original Image
+                  </Button>
+                </div>
+              )}
+
               {activeTab === EditTab.FILTERS && (
                 <div className="flex flex-col gap-2.5 animate-fade-in">
                   <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Image Enhancements</span>
@@ -2971,153 +3592,6 @@ function PreviewScreen() {
                   >
                     <RotateCcw size={15} className="mr-2" />
                     Reset Filters
-                  </Button>
-                </div>
-              )}
-
-              {activeTab === EditTab.CROP && (
-                <div className="flex flex-col gap-2.5 animate-fade-in">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider">Perspective Crop</span>
-                  </div>
-                  <p className="text-[11px] text-text-secondary leading-snug">
-                    Drag the box or corner handles to select. Click & hold inside selection box to move it.
-                  </p>
-
-                  {/* Custom Dimensions Input Box */}
-                  <div className="bg-bg-sunken border border-border p-2.5 rounded-lg space-y-2">
-                    <span className="text-[10px] font-bold text-text-primary uppercase tracking-wider block">
-                      Custom Size Input
-                    </span>
-                    <div className="grid grid-cols-3 gap-1.5 items-center">
-                      <div>
-                        <label className="text-[10px] font-semibold text-text-secondary block mb-0.5">Width</label>
-                        <input
-                          type="number"
-                          placeholder="W"
-                          value={customCropWidth}
-                          onChange={(e) => setCustomCropWidth(e.target.value)}
-                          className="w-full px-2 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-text-secondary block mb-0.5">Height</label>
-                        <input
-                          type="number"
-                          placeholder="H"
-                          value={customCropHeight}
-                          onChange={(e) => setCustomCropHeight(e.target.value)}
-                          className="w-full px-2 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-text-secondary block mb-0.5">Unit</label>
-                        <select
-                          value={customCropUnit}
-                          onChange={(e) => setCustomCropUnit(e.target.value as any)}
-                          className="w-full px-1.5 py-1 text-xs border border-border rounded bg-bg-surface text-text-primary focus:outline-none focus:border-accent"
-                        >
-                          <option value="px">px</option>
-                          <option value="mm">mm</option>
-                          <option value="cm">cm</option>
-                          <option value="in">in</option>
-                        </select>
-                      </div>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="w-full justify-center py-1 text-xs font-semibold"
-                      onClick={() => applyCustomCropDimensions()}
-                    >
-                      Set Selection Box
-                    </Button>
-
-                    {/* Recommended Presets */}
-                    <div className="pt-1 border-t border-border/60">
-                      <span className="text-[9px] font-semibold text-text-muted uppercase tracking-wider block mb-1">Recommended Presets</span>
-                      <div className="flex flex-wrap gap-1">
-                        {[
-                          { label: 'Passport (3.5×4.5 cm)', w: '3.5', h: '4.5', unit: 'cm' as const },
-                          { label: 'Stamp (2×2.5 cm)', w: '2', h: '2.5', unit: 'cm' as const },
-                          { label: 'A4 (210×297 mm)', w: '210', h: '297', unit: 'mm' as const },
-                          { label: '4×6 in', w: '4', h: '6', unit: 'in' as const },
-                          { label: 'Square 1:1', w: '500', h: '500', unit: 'px' as const },
-                        ].map((preset) => (
-                          <button
-                            key={preset.label}
-                            type="button"
-                            onClick={() => {
-                              setCustomCropWidth(preset.w);
-                              setCustomCropHeight(preset.h);
-                              setCustomCropUnit(preset.unit);
-                              applyCustomCropDimensions(preset.w, preset.h, preset.unit);
-                            }}
-                            className="px-1.5 py-0.5 text-[10px] bg-bg-surface hover:bg-accent/10 border border-border hover:border-accent/40 rounded text-text-secondary hover:text-accent transition-colors font-medium"
-                          >
-                            {preset.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Compact Zoom Loupe Preview */}
-                  <div className="border border-border rounded-lg bg-bg-sunken p-2 flex flex-col items-center justify-center gap-1">
-                    <div className="flex justify-between w-full items-center">
-                      <span className="text-[9px] font-semibold text-text-muted uppercase">Zoom Loupe</span>
-                      <span className="text-[9px] text-text-muted">Drag handle to inspect</span>
-                    </div>
-                    <div className="w-[110px] h-[110px] rounded border border-border bg-white overflow-hidden relative flex justify-center items-center shadow-inner">
-                      {dragType && ['tl', 'tr', 'bl', 'br'].includes(dragType) ? (
-                        <canvas
-                          ref={loupeCanvasRef}
-                          width={110}
-                          height={110}
-                          className="w-full h-full"
-                        />
-                      ) : (
-                        <span className="text-[10px] text-text-muted italic text-center p-2">
-                          Zoom preview
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-1.5">
-                    <Button
-                      variant="secondary"
-                      className="flex-1 justify-center py-1.5 text-xs"
-                      onClick={() => handleRotate(false)}
-                    >
-                      <RotateCcw size={13} className="mr-1" />
-                      Rotate CCW
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="flex-1 justify-center py-1.5 text-xs"
-                      onClick={() => handleRotate(true)}
-                    >
-                      <RotateCw size={13} className="mr-1" />
-                      Rotate CW
-                    </Button>
-                  </div>
-
-                  <Button
-                    variant="primary"
-                    className="w-full justify-center py-2 text-xs font-bold"
-                    onClick={executeCrop}
-                  >
-                    <Check size={15} className="mr-1.5" />
-                    Apply Crop
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="w-full justify-center text-xs py-1"
-                    onClick={handleResetCrop}
-                  >
-                    <RotateCcw size={14} className="mr-1.5" />
-                    Reset Crop & Rotation
                   </Button>
                 </div>
               )}
@@ -3268,7 +3742,7 @@ function PreviewScreen() {
                         Active Overlays ({placedSignatures.length} sig, {placedTexts.length} text)
                       </span>
                       <p className="text-[10px] text-text-muted leading-relaxed">
-                        Drag and resize elements on the canvas. Double click text boxes to edit text. Click 'X' to remove.
+                        Drag and resize elements on the canvas. Double click text boxes to edit text. Click &apos;X&apos; to remove.
                       </p>
                     </div>
                   ) : null}
@@ -3276,41 +3750,31 @@ function PreviewScreen() {
               )}
             </div>
 
-            {/* Bottom Actions for Saving and Overwriting */}
+            {/* Bottom Actions for Saving and Discarding */}
             <div className="border-t border-border pt-2.5 flex flex-col gap-1.5 flex-shrink-0">
               <Button
                 variant="primary"
                 className="w-full justify-center py-2 bg-[#16A34A] hover:bg-[#15803D] text-white border-none font-semibold text-xs shadow-sm"
-                onClick={handleSaveEdit}
+                onClick={() => handleSaveEdit()}
+                disabled={isProcessing || isAutoDetecting}
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 size={14} className="mr-1.5 animate-spin" />
+                    Saving Edits...
+                  </>
+                ) : (
+                  'Save & Overwrite'
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                className="w-full justify-center py-1.5 text-xs text-text-secondary hover:text-text-primary"
+                onClick={handleDiscardEdit}
                 disabled={isProcessing}
               >
-                {isProcessing ? 'Saving Edits...' : 'Save & Overwrite'}
+                Discard Changes
               </Button>
-              <div className="flex gap-1.5">
-                <Button
-                  variant="ghost"
-                  className="flex-1 justify-center py-1.5 text-xs"
-                  onClick={() => {
-                    setIsEditing(false);
-                    setPlacedSignatures((doc?.signatures || []).filter((sig) => (sig.page || 1) === pageNumber));
-                    toast.error('Changes discarded');
-                  }}
-                  disabled={isProcessing}
-                >
-                  Cancel Edit
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="flex-1 justify-center py-1.5 text-xs text-text-secondary hover:text-text-primary"
-                  onClick={() => {
-                    setIsEditing(false);
-                    setPlacedSignatures((doc?.signatures || []).filter((sig) => (sig.page || 1) === pageNumber));
-                  }}
-                  disabled={isProcessing}
-                >
-                  Close
-                </Button>
-              </div>
             </div>
           </div>
         )}

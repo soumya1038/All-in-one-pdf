@@ -58,6 +58,13 @@ export function registerFileHandlers(): void {
   });
 
   /**
+   * Handle file upload from base64/dataUrl
+   */
+  ipcMain.handle(IpcChannel.FILE_UPLOAD_BASE64, async (_, { base64Data, filename, type }) => {
+    return await fileService.createDocumentFromBase64(base64Data, filename, type);
+  });
+
+  /**
    * Handle file deletion
    */
   ipcMain.handle(IpcChannel.FILE_DELETE, async (_, documentId: string) => {

@@ -13,6 +13,7 @@ import ImageEditScreen from './screens/ImageEditScreen';
 import CanvasEditorScreen from './screens/CanvasEditorScreen';
 import OcrScreen from './screens/OcrScreen';
 import ExcelEditorScreen from './screens/ExcelEditorScreen';
+import SketchEditorScreen from './screens/SketchEditorScreen';
 import ScannerModal from './components/scanner/ScannerModal';
 import DocumentPreviewModal from './components/document/DocumentPreviewModal';
 import AddMoreModal from './components/document/AddMoreModal';
@@ -48,6 +49,8 @@ function App() {
         return <OcrScreen />;
       case AppView.EXCEL_EDITOR:
         return <ExcelEditorScreen />;
+      case AppView.SKETCH_EDITOR:
+        return <SketchEditorScreen />;
       default:
         return <HomeScreen />;
     }
@@ -61,7 +64,7 @@ function App() {
       <AddMoreModal />
       <InAppConfirmModal />
       <Toaster
-        position="top-right"
+        position="top-center"
         toastOptions={{
           duration: 4000,
           style: {

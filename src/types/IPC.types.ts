@@ -10,6 +10,7 @@ import { WorkbookData } from './Excel.types';
 export enum IpcChannel {
   // File operations
   FILE_UPLOAD = 'docuflow:file:upload',
+  FILE_UPLOAD_BASE64 = 'docuflow:file:uploadBase64',
   FILE_DELETE = 'docuflow:file:delete',
   FILE_VALIDATE = 'docuflow:file:validate',
   FILE_GET_THUMBNAIL = 'docuflow:file:getThumbnail',
@@ -54,6 +55,7 @@ export enum IpcChannel {
   SYSTEM_PRINT = 'docuflow:system:print',
   SYSTEM_DIALOG_CONFIRM = 'docuflow:system:dialogConfirm',
   SYSTEM_SAVE_BASE64 = 'docuflow:system:saveBase64',
+  SYSTEM_READ_IMAGE_DATA_URL = 'docuflow:system:readImageDataUrl',
 
   // Window controls
   WINDOW_MINIMIZE = 'docuflow:window:minimize',
@@ -67,6 +69,10 @@ export enum IpcChannel {
   EXCEL_PRINT = 'docuflow:excel:print',
   EXCEL_NEW = 'docuflow:excel:new',
   EXCEL_AUTO_SAVE = 'docuflow:excel:autoSave',
+
+  // OCR operations
+  OCR_RECOGNIZE = 'docuflow:ocr:recognize',
+  OCR_RENDER_PDF_PAGES = 'docuflow:ocr:renderPdfPages',
 }
 
 /**
@@ -179,6 +185,7 @@ export interface ThumbnailRequest {
 export interface IpcApi {
   // File operations
   uploadFiles: (filePaths: string[]) => Promise<Result<DocumentItem[]>>;
+  uploadBase64File: (base64Data: string, filename: string, type: DocumentType) => Promise<Result<DocumentItem>>;
   deleteFile: (documentId: string) => Promise<Result<void>>;
   validateFile: (filePath: string) => Promise<Result<FileValidationResponse>>;
   getThumbnail: (documentId: string) => Promise<Result<string>>;
@@ -221,6 +228,7 @@ export interface IpcApi {
   printDocument: (documentId: string) => Promise<Result<void>>;
   showConfirmDialog: (message: string, title?: string) => Promise<boolean>;
   saveFileFromBase64: (base64Data: string, defaultFilename: string, filters: { name: string; extensions: string[] }[]) => Promise<Result<string>>;
+  readImageAsDataUrl: (filePath: string) => Promise<Result<string>>;
 
   // Window controls
   minimizeWindow: () => void;
@@ -234,4 +242,56 @@ export interface IpcApi {
   printExcel: (workbookData: WorkbookData) => Promise<Result<void>>;
   newExcelWorkbook: () => Promise<Result<WorkbookData>>;
   autoSaveExcel: (workbookData: WorkbookData, sessionId: string) => Promise<Result<void>>;
+
+  // OCR operations
+  runOcr: (request: OcrRecognizeRequest) => Promise<Result<OcrRecognizeResultData>>;
+  renderPdfPagesForOcr: (request: OcrRenderPdfRequest) => Promise<Result<OcrRenderPdfPageItem[]>>;
+}
+
+/**
+ * OCR recognition request
+ */
+export interface OcrRecognizeRequest {
+  imageSource: string; // base64 dataUrl or local file path
+  languages: string[]; // e.g. ['eng'], ['ben'], etc.
+  region?: { x: number; y: number; w: number; h: number };
+  psm?: string; // 'auto' | '3' (Auto) | '6' (Single Block) | '11' (Sparse Text / Poster)
+  invert?: boolean; // force invert or auto-detect if undefined
+}
+
+/**
+ * OCR word item
+ */
+export interface OcrWordItem {
+  text: string;
+  confidence: number;
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+/**
+ * OCR recognition response
+ */
+export interface OcrRecognizeResultData {
+  text: string;
+  confidence: number;
+  words: OcrWordItem[];
+}
+
+/**
+ * OCR PDF render request
+ */
+export interface OcrRenderPdfRequest {
+  filePath?: string;
+  base64Data?: string;
+}
+
+/**
+ * OCR rendered PDF page
+ */
+export interface OcrRenderPdfPageItem {
+  pageNumber: number;
+  name: string;
+  dataUrl: string;
+  width: number;
+  height: number;
 }

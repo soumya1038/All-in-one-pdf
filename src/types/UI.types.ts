@@ -13,6 +13,7 @@ export enum AppView {
   CANVAS_EDITOR = 'CANVAS_EDITOR',
   OCR = 'OCR',
   EXCEL_EDITOR = 'EXCEL_EDITOR',
+  SKETCH_EDITOR = 'SKETCH_EDITOR',
 }
 
 /**

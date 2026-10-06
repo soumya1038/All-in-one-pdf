@@ -51,7 +51,12 @@ function ProcessingScreen() {
         setProgress(80);
 
         // Call backend to process documents
-        const documentIds = documents.map((d) => d.id);
+        const targetDocId = outputOptions.documentId || useAppStore.getState().ui.selectedDocumentId;
+        const isSingleWorkflow = outputOptions.workflow && outputOptions.workflow !== 'MERGE' && outputOptions.workflow !== 'NONE';
+        const documentIds = (isSingleWorkflow && targetDocId && documents.some((d) => d.id === targetDocId))
+          ? [targetDocId]
+          : documents.map((d) => d.id);
+
         const result = await window.electron.processOutput(documentIds, outputOptions);
 
         if (result.success) {

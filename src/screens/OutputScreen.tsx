@@ -8,6 +8,7 @@ import { DocumentType } from '../types/Document.types';
 import { formatFileSize } from '../utils/formatFileSize';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import DocumentSelectorBar from '../components/document/DocumentSelectorBar';
 
 function OutputScreen() {
   const documents = useAppStore((state) => state.documents);
@@ -112,12 +113,44 @@ function OutputScreen() {
     tempPath: string;
   }
 
-  const [activeDocIndex, setActiveDocIndex] = useState(0);
+  const selectedDocumentId = useAppStore((state) => state.ui.selectedDocumentId);
+
+  const [activeDocIndex, setActiveDocIndex] = useState(() => {
+    if (selectedDocumentId) {
+      const idx = documents.findIndex((d) => d.id === selectedDocumentId);
+      if (idx !== -1) return idx;
+    }
+    if (activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
+      const imgIdx = documents.findIndex((d) => d.type === DocumentType.IMAGE);
+      if (imgIdx !== -1) return imgIdx;
+    }
+    if (activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.SPLIT || activeWorkflow === WorkflowType.PROTECT) {
+      const pdfIdx = documents.findIndex((d) => d.type === DocumentType.PDF);
+      if (pdfIdx !== -1) return pdfIdx;
+    }
+    return 0;
+  });
   const [allPreviewPages, setAllPreviewPages] = useState<PreviewPageItem[]>([]);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
   const activeDoc = documents[activeDocIndex];
+
+  // Sync filename when activeDoc changes
+  useEffect(() => {
+    if (activeDoc) {
+      const fileBaseName = activeDoc.filename.substring(0, activeDoc.filename.lastIndexOf('.')) || activeDoc.filename;
+      if (activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE) {
+        setFilename(`${fileBaseName}_compressed`);
+      } else if (activeWorkflow === WorkflowType.CONVERT) {
+        setFilename(`${fileBaseName}_converted`);
+      } else if (activeWorkflow === WorkflowType.SPLIT) {
+        setFilename(`${fileBaseName}_split`);
+      } else if (activeWorkflow === WorkflowType.PROTECT) {
+        setFilename(`${fileBaseName}_protected`);
+      }
+    }
+  }, [activeDoc, activeWorkflow]);
 
   // Load all preview page images effect
   useEffect(() => {
@@ -210,12 +243,7 @@ function OutputScreen() {
   }, [activeDocIndex]);
 
   const handleBack = () => {
-    if (documents.length === 1 && activeWorkflow !== WorkflowType.NONE && activeWorkflow !== WorkflowType.MERGE) {
-      // If single file uploaded via quick actions, go back to Home
-      setView(AppView.HOME);
-    } else {
-      setView(AppView.DOCUMENT_LIST);
-    }
+    setView(AppView.DOCUMENT_LIST);
   };
 
   const handleCancelSession = async () => {
@@ -266,6 +294,7 @@ function OutputScreen() {
     updateOutputOptions({
       filename,
       format,
+      documentId: activeDoc?.id,
       compress: activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.COMPRESS_IMAGE || isCompressEnabled,
       compressionLevel,
       targetSize: activeWorkflow === WorkflowType.COMPRESS_IMAGE ? targetSize : undefined,
@@ -420,6 +449,26 @@ function OutputScreen() {
           </div>
         </div>
       </div>
+
+      {/* ── Document Switcher Bar ── */}
+      <DocumentSelectorBar
+        activeDocumentId={activeDoc?.id}
+        onSelectDocument={(doc) => {
+          const idx = documents.findIndex((d) => d.id === doc.id);
+          if (idx !== -1) {
+            setActiveDocIndex(idx);
+            setSelectedDocument(doc.id);
+          }
+        }}
+        acceptedTypes={
+          activeWorkflow === WorkflowType.COMPRESS_IMAGE
+            ? [DocumentType.IMAGE]
+            : (activeWorkflow === WorkflowType.COMPRESS || activeWorkflow === WorkflowType.SPLIT || activeWorkflow === WorkflowType.PROTECT)
+              ? [DocumentType.PDF]
+              : undefined
+        }
+        title={headerTitle}
+      />
 
       {/* Split Main Content Area */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
